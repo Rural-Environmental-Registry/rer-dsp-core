@@ -1,0 +1,85 @@
+# Example mapping for rer-dsp-job-data-migration (territorial levels).
+# Adjust source/target tables per adopter. Not wired into docker-compose yet.
+
+spring:
+  application:
+    name: dsp-batch
+  datasource:
+    batch:
+      url: jdbc:postgresql://localhost:5432/batch_metadata
+      username: batch
+      password: batch
+      driver-class-name: org.postgresql.Driver
+    source:
+      url: jdbc:postgresql://localhost:5432/source_db
+      username: source_user
+      password: source_user
+      driver-class-name: org.postgresql.Driver
+    target:
+      url: jdbc:postgresql://localhost:5432/target_db
+      username: target_user
+      password: target_user
+      driver-class-name: org.postgresql.Driver
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: never
+
+server:
+  port: 8086
+
+batch:
+  admin-unit:
+    level-1:
+      source-table: level1_source
+      target-table: level1_target
+      primary-key: id
+      geometry-column: geom
+      where-clause: "1=1"
+      comparison-columns:
+        - name
+      persist-columns:
+        - id
+        - name
+      layer-name: level1
+      srid: 4674
+      change-detection-strategy: DEFAULT
+    level-2:
+      source-table: level2_source
+      target-table: level2_target
+      primary-key: id
+      geometry-column: geom
+      where-clause: "1=1"
+      comparison-columns:
+        - name
+        - parent_id
+      persist-columns:
+        - id
+        - name
+        - parent_id
+      layer-name: level2
+      srid: 4674
+      change-detection-strategy: DEFAULT
+    level-3:
+      source-table: level3_source
+      target-table: level3_target
+      primary-key: id
+      geometry-column: geom
+      where-clause: "1=1"
+      comparison-columns:
+        - name
+        - parent_id
+      persist-columns:
+        - id
+        - name
+        - parent_id
+      layer-name: level3
+      srid: 4674
+      change-detection-strategy: DEFAULT
+
+execution-jobs:
+  admin-unit-level-1-geoserver-job: false
+  admin-unit-level-2-geoserver-job: false
+  admin-unit-level-3-geoserver-job: false
+  rural-property-geoserver-job: false

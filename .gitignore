@@ -1,0 +1,28 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+logs/
+*.tmp
+*.bak
+*~
+
+# AI assistants
+.kiro
+.amazonq/
+.continue/

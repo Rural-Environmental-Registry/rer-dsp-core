@@ -1,46 +1,79 @@
 # RER DSP — Core
 
-**Projeto**: Rural Environmental Registry — Data Sharing Platform  
-**Componente**: Core (Lógica de Domínio)  
-**Tipo**: Digital Public Good (DPG)  
-**Licença**: GPL-3.0
+**Project**: Rural Environmental Registry — Data Sharing Platform  
+**Component**: Core (installation orchestration & configuration)  
+**Type**: Digital Public Good (DPG)  
+**License**: GPL-3.0
 
 ---
 
-## 📋 Visão Geral
+## Overview
 
-Biblioteca core da plataforma DSP do RER. Contém a lógica de domínio, modelos de dados, regras de negócio e utilitários compartilhados entre os demais componentes.
+`rer-dsp-core` is the **installation hub** for the DSP stack (same role as RER `core`):
 
-## 🏗️ Arquitetura
+- Example adopter configuration (hierarchy, screens, KPIs)
+- Docker Compose to run backend + frontend locally
+- Docs for repositories and the installation contract
 
-Este componente faz parte do ecossistema RER DSP:
+Application code lives in sibling repositories (`rer-dsp-backend`, `rer-dsp-frontend`, jobs). This repo does **not** hold domain Java libraries.
 
+## Expected layout
+
+```text
+DSP/
+├── rer-dsp-core/          ← this repository
+├── rer-dsp-backend/
+├── rer-dsp-frontend/
+├── rer-dsp-job-data-migration/
+└── rer-dsp-job-geo-file-generation/
 ```
-rer-dsp-frontend (UI)
-    ↓
-rer-dsp-backend (API REST)
-    ↓
-rer-dsp-core  ← ESTE REPO
-    ↓
-rer-dsp-job-data-migration (ETL)
-rer-dsp-job-geo-file-generation (geoespacial)
-```
 
-## 🚀 Setup
+See [docs/submodules.md](docs/submodules.md).
+
+## Quick start
+
+Prerequisites: Docker 24+ with Compose v2.
 
 ```bash
-# Clonar
-git clone https://github.com/Rural-Environmental-Registry/rer-dsp-core.git
 cd rer-dsp-core
-
-# Instruções de build serão adicionadas conforme desenvolvimento
+cp .env.example .env
+chmod +x ./start.sh
+./start.sh
 ```
 
-## 📖 Documentação
+| Service | Default URL |
+| --- | --- |
+| Frontend | http://localhost:8081/dsp/ |
+| Backend API | http://localhost:8080/dsp-backend |
+| Installation config | http://localhost:8080/dsp-backend/config/installation |
 
-- [RER — Visão Geral](https://github.com/Rural-Environmental-Registry)
-- [SDD (System Design Document)](https://github.com/Rural-Environmental-Registry/core)
+Stop:
 
-## 📜 Licença
+```bash
+docker compose down
+```
 
-Este projeto é licenciado sob a [GNU General Public License v3.0](LICENSE).
+## Configuration
+
+| Path | Purpose |
+| --- | --- |
+| [`.env.example`](.env.example) | Ports, paths, CORS, frontend API URL |
+| [`config/installation/installation-config.json.example`](config/installation/installation-config.json.example) | Hierarchy, screens, KPIs (API contract) |
+| [`config/Backend/application/application.yml.example`](config/Backend/application/application.yml.example) | Backend Spring overrides (future) |
+| [`config/Frontend/environment/env.json.example`](config/Frontend/environment/env.json.example) | Runtime `urlBackend` example |
+| [`config/Job-Data-Migration/application/application.yaml.example`](config/Job-Data-Migration/application/application.yaml.example) | Batch level1/2/3 mapping example |
+
+Contract details: [docs/installation-config.md](docs/installation-config.md).
+
+Today `GET /config/installation` is still served from a **backend mock**. The JSON example here is the shape adopters and the API must keep aligned.
+
+## Not in this first version
+
+- GeoServer
+- Postgres/PostGIS service in Compose (pending DSP target schema)
+- Job containers in Compose
+- Reverse proxy / gateway
+
+## License
+
+[GNU General Public License v3.0](LICENSE)
