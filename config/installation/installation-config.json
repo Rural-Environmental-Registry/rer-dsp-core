@@ -31,7 +31,17 @@
       "theme": null,
       "level1SectionTitle": null,
       "level2SectionTitle": null,
-      "filterByTitle": null
+      "filterByTitle": null,
+      "detail": {
+        "sectionTitle": "Search details",
+        "propertySectionTitle": "Record data",
+        "registrationDateLabel": "Registration date",
+        "alterationDateLabel": "Alteration date",
+        "latitudeLabel": "Latitude",
+        "longitudeLabel": "Longitude",
+        "areaLabel": "Area",
+        "featuresDownloadLabel": "Download features"
+      }
     },
     "downloads": {
       "title": "Download public data",
@@ -49,10 +59,10 @@
   },
   "kpis": {
     "maxCards": 5,
-    "primaryCode": "REGISTERED_AREA",
+    "primaryCode": "AREA_OF_INTEREST",
     "cards": [
       {
-        "code": "REGISTERED_AREA",
+        "code": "AREA_OF_INTEREST",
         "label": "Registered properties",
         "unitOfMeasurement": "un.",
         "optionalLabel": "ha",
@@ -97,5 +107,13 @@
         "required": false
       }
     ]
+  },
+  "areaOfInterest": {
+    "areaUnit": "ha",
+    "areaUnitLabel": "ha"
+  },
+  "formats": {
+    "date": "dd/MM/yyyy",
+    "dateTime": "dd/MM/yyyy HH:mm:ss"
   }
 }

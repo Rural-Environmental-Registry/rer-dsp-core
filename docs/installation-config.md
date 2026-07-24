@@ -8,35 +8,35 @@ Source of truth for adopter-facing installation settings used by the DSP UI/API.
 
 Values are loaded from the JSON file mounted by the core into the backend:
 
-- Active file: [`config/installation/installation-config.json`](../config/installation/installation-config.json)
+- Active: [`config/installation/installation-config.json`](../config/installation/installation-config.json)
 - Template: [`config/installation/installation-config.json.example`](../config/installation/installation-config.json.example)
-
-Compose mounts the active file at `/config/installation-config.json` and sets:
 
 ```text
 DSP_INSTALLATION_CONFIG_FILE=file:/config/installation-config.json
 ```
 
-O backend **não** embute esse JSON no jar. A configuração fica só no core.
+O backend **não** embute esse JSON no jar.
 
 ## Shape
 
 | Field | Meaning |
 | --- | --- |
-| `hierarchy` | Generic territorial levels (`level1`…`level3`) with labels/placeholders |
-| `screens.home` | Always **2** levels: `level2`, `level3` (+ optional identifier) |
-| `screens.downloads` | Always **3** levels: `level1`, `level2`, `level3` (+ theme) |
-| `kpis` | Up to **5** cards; `primaryCode` must be first (registered properties) |
+| `hierarchy` | Levels `level1`…`level3` (labels/placeholders) |
+| `screens.home` | 2 levels (`level2`, `level3`) + identifier + `detail` |
+| `screens.downloads` | 3 levels + theme |
+| `kpis` | Up to 5 cards; `primaryCode` = **`AREA_OF_INTEREST`** |
+| `areaOfInterest` | Unit of area (`areaUnit` / `areaUnitLabel`) |
+| `formats` | `date` / `dateTime` patterns for the UI |
 
 ## Related APIs
 
-- `GET /territory/options?level=&parentId=` — options for each hierarchy level (tables `dsp.level1/2/3`)
-- Totalizers feed KPI **values**; KPI **labels/units** come from `kpis.cards`
+- `GET /territory/options?level=&parentId=` — `dsp.territory_level_*`
+- Totalizers / detail — `dsp.area_of_interest` + KPIs from this JSON
 
 ## Adopter changes
 
-1. Edit `config/installation/installation-config.json` (or copy from `.example`).
-2. Rename level labels (e.g. Country / Region / District).
-3. Adjust KPI card labels and colors (keep `REGISTERED_AREA` as `primaryCode` unless the product contract changes).
-4. Keep Home = 2 levels and Downloads = 3 levels.
-5. Restart the backend (`docker compose up -d dsp-backend`) — the file is read at startup (cached).
+1. Edit `installation-config.json` (or copy from `.example`).
+2. Rename hierarchy labels.
+3. Keep `AREA_OF_INTEREST` as `primaryCode` unless the product contract changes.
+4. Adjust `formats` and `areaOfInterest` as needed.
+5. Restart backend after edits (config is cached at startup).

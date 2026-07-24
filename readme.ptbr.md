@@ -76,7 +76,7 @@ docker compose down -v   # reaplica init SQL
 | Caminho | Função |
 | --- | --- |
 | [`.env.example`](.env.example) | Portas, DBs, source JDBC, `DSP_RUN_MIGRATION` |
-| [`config/db/dsp-db/`](config/db/dsp-db/) | Init SQL PostGIS + `dsp.level1/2/3` |
+| [`config/db/dsp-db/`](config/db/dsp-db/) | Init SQL PostGIS + `dsp.territory_level_*` + `dsp.area_of_interest` |
 | [`config/db/dsp-job-migration-db/`](config/db/dsp-job-migration-db/) | Init SQL `BATCH_*` |
 | [`config/Job-Data-Migration/application/application.yaml`](config/Job-Data-Migration/application/application.yaml) | Mapeamento ETL do job |
 | [`config/installation/installation-config.json`](config/installation/installation-config.json) | Hierarquia, telas, KPIs (montado no backend) |

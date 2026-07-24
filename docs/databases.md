@@ -1,48 +1,45 @@
 # Bancos de dados do DSP (core)
 
-Contrato de nomes usado pelo `rer-dsp-core` na instalação local.
+Contrato de nomes usado pelo `rer-dsp-core` na instalação local (alinhado ao backend).
 
 ## Bancos
 
 | Serviço Compose | Database | Papel |
 | --- | --- | --- |
-| `dsp-db` | `dsp-db` | Base operacional PostGIS (dados consumidos pela API) |
-| `dsp-job-migration-db` | `dsp-job-migration-db` | Metadados do Spring Batch (`BATCH_*`) do job de migração |
+| `dsp-db` | `dsp-db` | Base operacional PostGIS (API) |
+| `dsp-job-migration-db` | `dsp-job-migration-db` | Metadados Spring Batch (`BATCH_*`) |
 
-O banco **source** (origem da migração) fica fora do core — é o PostgreSQL externo do adotante (`DSP_SOURCE_JDBC_URL`).
+O banco **source** fica fora do core (`DSP_SOURCE_JDBC_URL`). Para teste local: `DSP/schema_2.sql`.
 
-## Schema e tabelas em `dsp-db`
+## Schema `dsp` (destino)
 
-Schema: `dsp`
+| Tabela | Colunas |
+| --- | --- |
+| `dsp.territory_level_1` | `id`, `name`, `geometry` (MultiPolygon **4674**) |
+| `dsp.territory_level_2` | `id`, `name`, `parent_id` → level_1, `geometry` |
+| `dsp.territory_level_3` | `id`, `name`, `parent_id` → level_2, `geometry` |
+| `dsp.area_of_interest` | `id`, `registration_date`, `alteration_date`, `territory_level_3_id`, `area`, `geometry` |
 
-| Tabela | Nível | Colunas |
-| --- | --- | --- |
-| `dsp.level1` | Level 1 | `id`, `label`, `geometry` |
-| `dsp.level2` | Level 2 | `id`, `label`, `level1_id` → `level1`, `geometry` |
-| `dsp.level3` | Level 3 | `id`, `label`, `level2_id` → `level2`, `geometry` |
+SRID **4674** (SIRGAS 2000) — alinhado ao job CAR (`srid: 4674` no YAML). Se o DDL antigo estava em 4326, use `docker compose down -v` para recriar.
 
-Nomes alinhados ao contrato de instalação e às entidades JPA do backend (`TerritoryLevel*`).
+Scripts:
+
+- `config/db/dsp-db/00_extensions.sql`
+- `config/db/dsp-db/01_admin_units.sql`
+- `config/db/dsp-db/02_area_of_interest.sql`
+- `config/db/dsp-job-migration-db/01_spring_batch_schema.sql`
 
 O backend usa `spring.jpa.hibernate.ddl-auto=none` — o DDL fica só no init SQL do core.
 
-## Schema em `dsp-job-migration-db`
+**Importante:** scripts em `/docker-entrypoint-initdb.d` rodam só na **primeira** criação do volume. Após mudar o DDL:
 
-Tabelas oficiais do Spring Batch 5 (`BATCH_JOB_*`, `BATCH_STEP_*` + sequences). Criadas por init SQL; o job usa `spring.batch.jdbc.initialize-schema: never`.
+```bash
+docker compose down -v
+./start.sh
+```
 
-## Migração (`DSP_RUN_MIGRATION`)
+## Migração
 
-Com `DSP_RUN_MIGRATION=true`, o `start.sh`:
+Com `DSP_RUN_MIGRATION=true`, o `start.sh` sobe os DBs, executa `dsp-job-migration` e sobe FE/BE.
 
-1. Sobe `dsp-db` e `dsp-job-migration-db`
-2. Executa o serviço one-shot `dsp-job-migration` (profile `migration`)
-3. Sobe backend e frontend
-
-Configuração do job: `config/Job-Data-Migration/application/application.yaml`  
-Ajuste `source-table` / `column-mapping` ao schema do banco externo.
-
-## Onde estão os scripts
-
-- `config/db/dsp-db/` — extensão PostGIS + tabelas `dsp.level*`
-- `config/db/dsp-job-migration-db/` — schema `BATCH_*`
-
-Scripts em `/docker-entrypoint-initdb.d` rodam **somente** na primeira criação do volume Docker.
+YAML: `config/Job-Data-Migration/application/application.yaml`
