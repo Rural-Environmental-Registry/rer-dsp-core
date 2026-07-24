@@ -20,10 +20,11 @@ DSP/
 └── rer-dsp-job-geo-file-generation/
 ```
 
-Paths are configurable in `.env` (`DSP_BACKEND_PATH`, `DSP_FRONTEND_PATH`).
+Paths are configurable in `.env` (`DSP_BACKEND_PATH`, `DSP_FRONTEND_PATH`, `DSP_JOB_MIGRATION_PATH`).
+
+Databases created by this core: see [databases.md](databases.md).
 
 ## Not included yet
 
 - GeoServer
 - Reverse proxy / gateway
-- Database schema service (coming with the DSP target DB work)

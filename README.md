@@ -12,10 +12,11 @@
 `rer-dsp-core` is the **installation hub** for the DSP stack (same role as RER `core`):
 
 - Example adopter configuration (hierarchy, screens, KPIs)
+- Init SQL and Docker Compose for databases `dsp-db` and `dsp-job-migration-db`
+- Optional migration job (`DSP_RUN_MIGRATION=true`)
 - Docker Compose to run backend + frontend locally
-- Docs for repositories and the installation contract
 
-Application code lives in sibling repositories (`rer-dsp-backend`, `rer-dsp-frontend`, jobs). This repo does **not** hold domain Java libraries.
+Application code lives in sibling repositories. This repo does **not** hold domain Java libraries.
 
 ## Expected layout
 
@@ -28,7 +29,7 @@ DSP/
 └── rer-dsp-job-geo-file-generation/
 ```
 
-See [docs/submodules.md](docs/submodules.md).
+See [docs/submodules.md](docs/submodules.md) and [docs/databases.md](docs/databases.md).
 
 ## Quick start
 
@@ -41,37 +42,48 @@ chmod +x ./start.sh
 ./start.sh
 ```
 
-| Service | Default URL |
+With migration from the adopter external database:
+
+```bash
+# Adjust DSP_SOURCE_* and config/Job-Data-Migration/application/application.yaml
+DSP_RUN_MIGRATION=true ./start.sh
+```
+
+| Service | Default URL / port |
 | --- | --- |
 | Frontend | http://localhost:8081/dsp/ |
 | Backend API | http://localhost:8080/dsp-backend |
 | Installation config | http://localhost:8080/dsp-backend/config/installation |
+| DSP DB (`dsp-db`) | localhost:5433 |
+| Job migration DB (`dsp-job-migration-db`) | localhost:5434 |
 
-Stop:
+Verify tables:
+
+```bash
+docker compose exec dsp-db psql -U dsp -d dsp-db -c '\dt dsp.*'
+docker compose exec dsp-job-migration-db psql -U dsp_job -d dsp-job-migration-db -c '\dt BATCH*'
+```
+
+Stop / recreate databases:
 
 ```bash
 docker compose down
+docker compose down -v   # re-runs init SQL
 ```
 
 ## Configuration
 
 | Path | Purpose |
 | --- | --- |
-| [`.env.example`](.env.example) | Ports, paths, CORS, frontend API URL |
-| [`config/installation/installation-config.json.example`](config/installation/installation-config.json.example) | Hierarchy, screens, KPIs (API contract) |
-| [`config/Backend/application/application.yml.example`](config/Backend/application/application.yml.example) | Backend Spring overrides (future) |
-| [`config/Frontend/environment/env.json.example`](config/Frontend/environment/env.json.example) | Runtime `urlBackend` example |
-| [`config/Job-Data-Migration/application/application.yaml.example`](config/Job-Data-Migration/application/application.yaml.example) | Batch level1/2/3 mapping example |
+| [`.env.example`](.env.example) | Ports, DBs, source JDBC, `DSP_RUN_MIGRATION` |
+| [`config/db/dsp-db/`](config/db/dsp-db/) | PostGIS init SQL + `dsp.level1/2/3` |
+| [`config/db/dsp-job-migration-db/`](config/db/dsp-job-migration-db/) | `BATCH_*` init SQL |
+| [`config/Job-Data-Migration/application/application.yaml`](config/Job-Data-Migration/application/application.yaml) | Job ETL mapping |
+| [`config/installation/installation-config.json`](config/installation/installation-config.json) | Hierarchy, screens, KPIs (mounted into backend) |
 
-Contract details: [docs/installation-config.md](docs/installation-config.md).
-
-Today `GET /config/installation` is still served from a **backend mock**. The JSON example here is the shape adopters and the API must keep aligned.
-
-## Not in this first version
+## Not in the core yet
 
 - GeoServer
-- Postgres/PostGIS service in Compose (pending DSP target schema)
-- Job containers in Compose
 - Reverse proxy / gateway
 
 ## License

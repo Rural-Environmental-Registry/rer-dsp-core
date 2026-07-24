@@ -1,9 +1,6 @@
-# Copy/reference: the file mounted by Compose is application.yaml (same content).
-# See application.yaml in this folder for the active configuration.
-#
-# Target tables: dsp.level1 / dsp.level2 / dsp.level3 (core init SQL).
-# Batch DB: dsp-job-migration-db. Operational DB: dsp-db.
-# Override source JDBC via DSP_SOURCE_* in the root .env.
+# Configuração do job de migração usada pelo core (montada no container).
+# Datasources de source/target/batch podem ser sobrescritos por env no Compose.
+# Ajuste source-table / column-mapping ao banco externo do adotante.
 
 spring:
   application:
@@ -31,6 +28,9 @@ spring:
       enabled: false
     jdbc:
       initialize-schema: never
+
+server:
+  port: 8086
 
 batch:
   admin-unit:
@@ -100,3 +100,7 @@ execution-jobs:
   admin-unit-level-2-geoserver-job: true
   admin-unit-level-3-geoserver-job: true
   rural-property-geoserver-job: false
+
+logging:
+  level:
+    br.car.dsp_batch: INFO

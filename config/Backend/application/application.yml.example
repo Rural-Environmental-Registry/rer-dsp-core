@@ -1,15 +1,23 @@
 # Example Spring configuration for the DSP backend (adopter overrides).
-# Today the backend still serves installation config from mock code
-# (GET /config/installation). Later this file / the database will feed that API.
+# Datasource and installation-config are injected by docker-compose from .env.
 
 server:
   port: 8080
   servlet:
     context-path: /dsp-backend
 
-# When the DSP database is ready, point the datasource here.
-# spring:
-#   datasource:
-#     url: jdbc:postgresql://dsp-db:5432/dsp
-#     username: dsp
-#     password: dsp
+spring:
+  datasource:
+    url: jdbc:postgresql://dsp-db:5432/dsp-db
+    username: dsp
+    password: dsp
+  jpa:
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        default_schema: dsp
+
+dsp:
+  installation-config:
+    file: file:/config/installation-config.json
