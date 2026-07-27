@@ -33,6 +33,12 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! docker info >/dev/null 2>&1; then
+  error "Docker daemon is not running. Start Docker and run './start.sh' again."
+  exit 1
+fi
+ok "Docker and Docker Compose OK"
+
 if [ ! -f .env ]; then
   info "Creating .env from .env.example"
   cp .env.example .env
@@ -52,13 +58,16 @@ JOB_PATH="${DSP_JOB_MIGRATION_PATH:-../rer-dsp-job-data-migration}"
 
 resolve_path() {
   local path="$1"
+  local resolved
   if [[ "$path" = /* ]]; then
-    printf '%s\n' "$path"
+    resolved="$path"
   else
-    printf '%s\n' "$ROOT_DIR/$path"
+    resolved="$ROOT_DIR/$path"
   fi
+  realpath -m "$resolved"
 }
 
+info "Resolving repository paths..."
 BACKEND_ABS="$(resolve_path "$BACKEND_PATH")"
 FRONTEND_ABS="$(resolve_path "$FRONTEND_PATH")"
 JOB_ABS="$(resolve_path "$JOB_PATH")"
@@ -68,15 +77,36 @@ if [ ! -f "$BACKEND_ABS/Dockerfile" ]; then
   error "Clone rer-dsp-backend as a sibling or set DSP_BACKEND_PATH in .env"
   exit 1
 fi
+ok "Backend found: $BACKEND_ABS"
 
 if [ ! -f "$FRONTEND_ABS/Dockerfile" ]; then
   error "Frontend not found at: $FRONTEND_ABS"
   error "Clone rer-dsp-frontend as a sibling or set DSP_FRONTEND_PATH in .env"
   exit 1
 fi
+ok "Frontend found: $FRONTEND_ABS"
 
-ok "Backend:  $BACKEND_ABS"
-ok "Frontend: $FRONTEND_ABS"
+MIGRATION_CONFIG_EXAMPLE="$ROOT_DIR/config/Job-Data-Migration/application/application.yaml.example"
+MIGRATION_CONFIG="$ROOT_DIR/config/Job-Data-Migration/application/application.yaml"
+if [ ! -f "$MIGRATION_CONFIG_EXAMPLE" ]; then
+  error "Migration config template not found at: $MIGRATION_CONFIG_EXAMPLE"
+  exit 1
+fi
+if [ ! -f "$MIGRATION_CONFIG" ]; then
+  error "Configuration file not found:"
+  echo "        $MIGRATION_CONFIG"
+  cp "$MIGRATION_CONFIG_EXAMPLE" "$MIGRATION_CONFIG"
+  info "Configuration file created from template:"
+  echo "       $MIGRATION_CONFIG"
+  error "Please edit the generated configuration file with the correct source database mappings and run './start.sh' again."
+  exit 1
+fi
+if cmp -s "$MIGRATION_CONFIG" "$MIGRATION_CONFIG_EXAMPLE"; then
+  error "Migration config is still identical to the template: $MIGRATION_CONFIG"
+  error "Edit this file for your source DB mapping before continuing."
+  exit 1
+fi
+ok "Migration config found: $MIGRATION_CONFIG"
 
 wait_for_db() {
   local service="$1"
@@ -95,16 +125,19 @@ wait_for_db() {
 
 info "Starting databases (dsp-db, dsp-job-migration-db)..."
 docker compose --env-file .env up -d dsp-db dsp-job-migration-db
+ok "Database containers started"
 
 info "Waiting for databases to become healthy..."
 if ! wait_for_db dsp-db "${DSP_DB_USER:-dsp}" "${DSP_DB_NAME:-dsp-db}"; then
   error "dsp-db did not become ready in time."
   exit 1
 fi
+ok "dsp-db ready"
 if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
   error "dsp-job-migration-db did not become ready in time."
   exit 1
 fi
+ok "dsp-job-migration-db ready"
 ok "Databases are ready"
 
 if [ "${DSP_RUN_MIGRATION:-false}" = "true" ]; then
@@ -117,7 +150,7 @@ if [ "${DSP_RUN_MIGRATION:-false}" = "true" ]; then
     error "DSP_RUN_MIGRATION=true requires DSP_SOURCE_JDBC_URL in .env"
     exit 1
   fi
-  ok "Job:      $JOB_ABS"
+  ok "Migration job found: $JOB_ABS"
   info "Running data migration (profile=migration)..."
   docker compose --env-file .env --profile migration run --rm --build dsp-job-migration
   ok "Migration finished"
@@ -127,6 +160,7 @@ fi
 
 info "Building and starting application containers..."
 docker compose --env-file .env up -d --build dsp-backend dsp-frontend
+ok "Backend and frontend are running"
 
 ok "Stack is up"
 echo ""
