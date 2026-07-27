@@ -2,20 +2,20 @@
   "hierarchy": [
     {
       "key": "level1",
-      "label": "Level 1",
-      "placeholder": "Select level 1",
+      "label": "Continent",
+      "placeholder": "Select continent",
       "order": 1
     },
     {
       "key": "level2",
-      "label": "Level 2",
-      "placeholder": "Select level 2",
+      "label": "Country",
+      "placeholder": "Select country",
       "order": 2
     },
     {
       "key": "level3",
-      "label": "Level 3",
-      "placeholder": "Select level 3",
+      "label": "Administrative area",
+      "placeholder": "Select administrative area",
       "order": 3
     }
   ],
@@ -52,8 +52,8 @@
         "label": "Theme",
         "placeholder": "All themes"
       },
-      "level1SectionTitle": "Select the level 1 you want to access for Downloads",
-      "level2SectionTitle": "Options for the selected level 1",
+      "level1SectionTitle": "Select the continent you want to access for Downloads",
+      "level2SectionTitle": "Options for the selected continent",
       "filterByTitle": "Filter by:"
     }
   },

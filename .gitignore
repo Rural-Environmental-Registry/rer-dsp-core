@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+config/installation/installation-config.json
+config/map/mapLayersConfig.json
+
 # IDEs
 .idea/
 .vscode/

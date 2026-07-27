@@ -8,14 +8,20 @@ Source of truth for adopter-facing installation settings used by the DSP UI/API.
 
 Values are loaded from the JSON file mounted by the core into the backend:
 
-- Active: [`config/installation/installation-config.json`](../config/installation/installation-config.json)
-- Template: [`config/installation/installation-config.json.example`](../config/installation/installation-config.json.example)
+- Active (adopter-local, gitignored): `config/installation/installation-config.json`
+- Template: [`config/installation/installation-config.json.example`](../config/installation/installation-config.json.example) (based on backend `installationConfig2.json`)
 
 ```text
 DSP_INSTALLATION_CONFIG_FILE=file:/config/installation-config.json
 ```
 
-O backend **não** embute esse JSON no jar.
+The backend does **not** package this JSON in the jar.
+
+## First run (`./start.sh`)
+
+1. If `installation-config.json` is missing, `start.sh` copies it from `.example` and exits.
+2. If the active file is still identical to `.example`, startup is **blocked** until you edit hierarchy labels, screens, KPIs, and formats.
+3. After edits, restart the stack (re-run `./start.sh`).
 
 ## Shape
 
@@ -35,8 +41,8 @@ O backend **não** embute esse JSON no jar.
 
 ## Adopter changes
 
-1. Edit `installation-config.json` (or copy from `.example`).
-2. Rename hierarchy labels.
+1. Run `./start.sh` once to generate the active file from `.example` (or copy manually).
+2. Edit `installation-config.json` — rename hierarchy labels for your territory model.
 3. Keep `AREA_OF_INTEREST` as `primaryCode` unless the product contract changes.
 4. Adjust `formats` and `areaOfInterest` as needed.
 5. Restart backend after edits (config is cached at startup).

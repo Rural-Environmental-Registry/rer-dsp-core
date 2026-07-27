@@ -26,5 +26,4 @@ Databases created by this core: see [databases.md](databases.md).
 
 ## Not included yet
 
-- GeoServer
 - Reverse proxy / gateway

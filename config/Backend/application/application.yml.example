@@ -1,5 +1,5 @@
 # Example Spring configuration for the DSP backend (adopter overrides).
-# Datasource and installation-config are injected by docker-compose from .env.
+# Datasource, installation-config and map layers are injected by docker-compose from .env.
 
 server:
   port: 8080
@@ -21,3 +21,5 @@ spring:
 dsp:
   installation-config:
     file: file:/config/installation-config.json
+  map:
+    layers-file: file:/config/mapLayersConfig.json

@@ -9,7 +9,7 @@ Contrato de nomes usado pelo `rer-dsp-core` na instalação local (alinhado ao b
 | `dsp-db` | `dsp-db` | Base operacional PostGIS (API) |
 | `dsp-job-migration-db` | `dsp-job-migration-db` | Metadados Spring Batch (`BATCH_*`) |
 
-O banco **source** fica fora do core (`DSP_SOURCE_JDBC_URL`). Para teste local: `DSP/schema_2.sql`.
+O banco **source** fica fora do core — configure `spring.datasource.source` em `config/Job-Data-Migration/application/application.yaml`. Para teste local: `DSP/schema_2.sql`.
 
 ## Schema `dsp` (destino)
 

@@ -11,8 +11,9 @@
 
 `rer-dsp-core` is the **installation hub** for the DSP stack (same role as RER `core`):
 
-- Example adopter configuration (hierarchy, screens, KPIs)
+- Example adopter configuration (hierarchy, screens, KPIs, map layers)
 - Init SQL and Docker Compose for databases `dsp-db` and `dsp-job-migration-db`
+- GeoServer Exhibition (WMS for the map)
 - Optional migration job (`DSP_RUN_MIGRATION=true`)
 - Docker Compose to run backend + frontend locally
 
@@ -42,20 +43,30 @@ chmod +x ./start.sh
 ./start.sh
 ```
 
+On first run, `./start.sh` creates adopter config files from templates and **stops** until you edit them:
+
+- `config/installation/installation-config.json` — UI labels, screens, KPIs
+- `config/map/mapLayersConfig.json` — GeoServer WMS layers
+
+Re-run `./start.sh` after editing both files.
+
 With migration from the adopter external database:
 
 ```bash
-# Adjust DSP_SOURCE_* and config/Job-Data-Migration/application/application.yaml
+# Edit config/Job-Data-Migration/application/application.yaml (JDBC + ETL mapping)
 DSP_RUN_MIGRATION=true ./start.sh
 ```
 
 | Service | Default URL / port |
 | --- | --- |
-| Frontend | http://localhost:8081/dsp/ |
-| Backend API | http://localhost:8080/dsp-backend |
-| Installation config | http://localhost:8080/dsp-backend/config/installation |
-| DSP DB (`dsp-db`) | localhost:5433 |
-| Job migration DB (`dsp-job-migration-db`) | localhost:5434 |
+| Frontend | http://localhost:22667/dsp/ |
+| Backend API | http://localhost:22666/dsp-backend |
+| Installation config | http://localhost:22666/dsp-backend/config/installation |
+| Map layers | http://localhost:22666/dsp-backend/map/getLayers |
+| GeoServer Exhibition | http://localhost:22668/geoserver/web/ |
+| GeoServer WMS | http://localhost:22668/geoserver/dsp/wms |
+| DSP DB (`dsp-db`) | localhost:20654 |
+| Job migration DB (`dsp-job-migration-db`) | localhost:20655 |
 
 Verify tables:
 
@@ -75,15 +86,18 @@ docker compose down -v   # re-runs init SQL
 
 | Path | Purpose |
 | --- | --- |
-| [`.env.example`](.env.example) | Ports, DBs, source JDBC, `DSP_RUN_MIGRATION` |
+| [`.env.example`](.env.example) | Ports, DBs, `DSP_RUN_MIGRATION` |
 | [`config/db/dsp-db/`](config/db/dsp-db/) | PostGIS init SQL + `dsp.territory_level_*` + `dsp.area_of_interest` |
 | [`config/db/dsp-job-migration-db/`](config/db/dsp-job-migration-db/) | `BATCH_*` init SQL |
-| [`config/Job-Data-Migration/application/application.yaml`](config/Job-Data-Migration/application/application.yaml) | Job ETL mapping |
-| [`config/installation/installation-config.json`](config/installation/installation-config.json) | Hierarchy, screens, KPIs (mounted into backend) |
+| [`config/Job-Data-Migration/application/application.yaml`](config/Job-Data-Migration/application/application.yaml) | JDBC connections + job ETL mapping |
+| [`config/installation/installation-config.json.example`](config/installation/installation-config.json.example) | Template: hierarchy, screens, KPIs (active file created by `start.sh`) |
+| [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: WMS layers / GeoServer (active file created by `start.sh`) |
+| [`config/GeoserverExhibition/docker/`](config/GeoserverExhibition/docker/) | GeoServer Exhibition image + populate script |
+
+See also [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md), and [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
 
 ## Not in the core yet
 
-- GeoServer
 - Reverse proxy / gateway
 
 ## License

@@ -1,6 +1,6 @@
 # =============================================================================
 # RER DSP — Core
-# Local stack: databases + optional migration job + backend + frontend
+# Local stack: databases + optional migration job + GeoServer Exhibition + backend + frontend
 # =============================================================================
 # Prerequisites:
 #   - Docker Compose v2
@@ -21,7 +21,7 @@ services:
     container_name: dsp-db
     restart: unless-stopped
     ports:
-      - "${DSP_DB_HOST_PORT:-5433}:5432"
+      - "${DSP_DB_HOST_PORT:-20654}:5432"
     environment:
       POSTGRES_DB: ${DSP_DB_NAME:-dsp-db}
       POSTGRES_USER: ${DSP_DB_USER:-dsp}
@@ -46,7 +46,7 @@ services:
     container_name: dsp-job-migration-db
     restart: unless-stopped
     ports:
-      - "${DSP_JOB_MIGRATION_DB_HOST_PORT:-5434}:5432"
+      - "${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}:5432"
     environment:
       POSTGRES_DB: ${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}
       POSTGRES_USER: ${DSP_JOB_MIGRATION_DB_USER:-dsp_job}
@@ -81,15 +81,6 @@ services:
     environment:
       SPRING_CONFIG_LOCATION: file:/config/application.yaml
       SPRING_MAIN_WEB_APPLICATION_TYPE: none
-      SPRING_DATASOURCE_BATCH_URL: jdbc:postgresql://dsp-job-migration-db:5432/${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}
-      SPRING_DATASOURCE_BATCH_USERNAME: ${DSP_JOB_MIGRATION_DB_USER:-dsp_job}
-      SPRING_DATASOURCE_BATCH_PASSWORD: ${DSP_JOB_MIGRATION_DB_PASSWORD:-dsp_job}
-      SPRING_DATASOURCE_TARGET_URL: jdbc:postgresql://dsp-db:5432/${DSP_DB_NAME:-dsp-db}
-      SPRING_DATASOURCE_TARGET_USERNAME: ${DSP_DB_USER:-dsp}
-      SPRING_DATASOURCE_TARGET_PASSWORD: ${DSP_DB_PASSWORD:-dsp}
-      SPRING_DATASOURCE_SOURCE_URL: ${DSP_SOURCE_JDBC_URL:-jdbc:postgresql://host.docker.internal:5432/source_db}
-      SPRING_DATASOURCE_SOURCE_USERNAME: ${DSP_SOURCE_DB_USER:-source_user}
-      SPRING_DATASOURCE_SOURCE_PASSWORD: ${DSP_SOURCE_DB_PASSWORD:-source_user}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -111,17 +102,63 @@ services:
     container_name: dsp-backend
     restart: unless-stopped
     ports:
-      - "${DSP_BACKEND_HOST_PORT:-8080}:8080"
+      - "${DSP_BACKEND_HOST_PORT:-22666}:8080"
     volumes:
       - ./config/installation/installation-config.json:/config/installation-config.json:ro
+      - ./config/map/mapLayersConfig.json:/config/mapLayersConfig.json:ro
     environment:
       SERVER_SERVLET_CONTEXT_PATH: ${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}
-      DSP_CORS_ALLOWED_ORIGINS: ${DSP_CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost/dsp,http://localhost:5173,http://localhost:8081}
+      DSP_CORS_ALLOWED_ORIGINS: ${DSP_CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost/dsp,http://localhost:5173,http://localhost:22667}
       DSP_INSTALLATION_CONFIG_FILE: ${DSP_INSTALLATION_CONFIG_FILE:-file:/config/installation-config.json}
+      DSP_MAP_LAYERS_FILE: ${DSP_MAP_LAYERS_FILE:-file:/config/mapLayersConfig.json}
       SPRING_DATASOURCE_URL: jdbc:postgresql://dsp-db:5432/${DSP_DB_NAME:-dsp-db}
       SPRING_DATASOURCE_USERNAME: ${DSP_DB_USER:-dsp}
       SPRING_DATASOURCE_PASSWORD: ${DSP_DB_PASSWORD:-dsp}
       SPRING_JPA_HIBERNATE_DDL_AUTO: none
+    depends_on:
+      dsp-db:
+        condition: service_healthy
+    networks:
+      - dsp_network
+
+  # ---------------------------------------------------------------------------
+  # GeoServer Exhibition — WMS for map layers (mapLayersConfig.json)
+  # ---------------------------------------------------------------------------
+  dsp-geoserver-exhibition:
+    image: dsp-geoserver-exhibition:local
+    build:
+      context: ./config/GeoserverExhibition/docker
+      dockerfile: Dockerfile
+    container_name: dsp-geoserver-exhibition
+    restart: unless-stopped
+    ports:
+      - "${DSP_GEOSERVER_HOST_PORT:-22668}:8080"
+    environment:
+      GEOSERVER_DATA_DIR: /var/geoserver/datadir
+      RUN_UNPRIVILEGED: "true"
+      RUN_WITH_USER_UID: "999"
+      RUN_WITH_USER_GID: "999"
+      CHANGE_OWNERSHIP_ON_FOLDERS: /opt /var/geoserver/datadir /usr/local/tomcat/temp /usr/local/tomcat/work /usr/local/tomcat/logs
+      GEOSERVER_ADMIN_USER: ${DSP_GEOSERVER_ADMIN_USER:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      GEOSERVER_CSRF_DISABLED: "true"
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "*"
+      CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,HEAD,OPTIONS
+      CORS_ALLOWED_HEADERS: "*"
+      GEOSERVER_URL: http://localhost:8080/geoserver
+      DB_HOST: dsp-db
+      DB_PORT: "5432"
+      DB_NAME: ${DSP_DB_NAME:-dsp-db}
+      DB_SCHEMA: dsp
+      DB_USER: ${DSP_DB_USER:-dsp}
+      DB_PASSWORD: ${DSP_DB_PASSWORD:-dsp}
+      WORKSPACE_NAME: dsp
+      DATASTORE_NAME: dsp-db
+      MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
+    volumes:
+      - dsp_geoserver_exhibition_data:/var/geoserver/datadir
+      - ./config/map/mapLayersConfig.json:/config/mapLayersConfig.json:ro
     depends_on:
       dsp-db:
         condition: service_healthy
@@ -136,11 +173,11 @@ services:
       args:
         APP_VERSION: ${APP_VERSION:-0.0.0}
         VITE_BASE_URL: ${VITE_BASE_URL:-/dsp/}
-        VITE_DSP_API_URL: ${VITE_DSP_API_URL:-http://localhost:8080/dsp-backend}
+        VITE_DSP_API_URL: ${VITE_DSP_API_URL:-http://localhost:22666/dsp-backend}
     container_name: dsp-frontend
     restart: unless-stopped
     ports:
-      - "${DSP_FRONTEND_HOST_PORT:-8081}:8080"
+      - "${DSP_FRONTEND_HOST_PORT:-22667}:8080"
     depends_on:
       - dsp-backend
     networks:
@@ -153,3 +190,4 @@ networks:
 volumes:
   dsp_db_data:
   dsp_job_migration_db_data:
+  dsp_geoserver_exhibition_data:
