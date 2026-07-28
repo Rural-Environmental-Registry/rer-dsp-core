@@ -1,12 +1,8 @@
-# Example = copy of the active application.yaml (CAR → dsp.*). Edit application.yaml or this file and keep them synchronized.
-
-# Migration job assembled by the core (Compose → /config/application.yaml).
-# CAR Nacional mapping (usr_geocar_aplicacao) → dsp.territory_level_* + area_of_interest.
-# Mapping source: DSP/application.yaml (provided by a colleague).
+# Migration job mounted by the core (Compose → /config/application.yaml).
+# Mapeamento CAR Nacional (usr_geocar_aplicacao) → dsp.territory_level_* + area_of_interest.
+# Mapping source: DSP/application.yaml. Datasources adjusted for the Docker stack.
 #
-# JDBC connections (batch, target, source) and ETL mapping are defined in this file.
-# Docker hosts: batch → dsp-job-migration-db, target → dsp-db.
-# External source: host.docker.internal (local testing) or the adopter's VPN/DNS.
+# Source JDBC can also come from .env (DSP_SOURCE_*), which takes precedence in Compose.
 
 spring:
   application:

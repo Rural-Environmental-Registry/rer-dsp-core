@@ -1,4 +1,4 @@
--- Extensões do banco operacional DSP (PostGIS).
--- Executado na primeira inicialização do volume do serviço dsp-db.
+-- Extensions for the DSP operational database (PostGIS).
+-- Runs on first volume initialization of the dsp-db service.
 
 CREATE EXTENSION IF NOT EXISTS postgis;

@@ -1,7 +1,7 @@
--- Schema oficial Spring Batch 5.2.x (PostgreSQL).
--- Banco: dsp-job-migration-db (serviço dsp-job-migration-db).
--- Necessário porque o job usa spring.batch.jdbc.initialize-schema=never.
--- Fonte: rer-dsp-job-data-migration (adaptado para init do core).
+-- Official Spring Batch 5.2.x schema (PostgreSQL).
+-- Database: dsp-job-migration-db (dsp-job-migration-db service).
+-- Required because the job uses spring.batch.jdbc.initialize-schema=never.
+-- Source: rer-dsp-job-data-migration (adapted for core init).
 
 CREATE TABLE IF NOT EXISTS BATCH_JOB_INSTANCE (
     JOB_INSTANCE_ID BIGINT NOT NULL PRIMARY KEY,

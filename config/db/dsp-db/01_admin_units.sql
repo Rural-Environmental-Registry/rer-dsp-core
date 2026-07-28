@@ -1,7 +1,7 @@
--- Unidades administrativas do DSP (contrato alinhado ao backend + CAR).
--- Tabelas: dsp.territory_level_1 / _2 / _3
--- Colunas: id, name, geometry; filhos usam parent_id.
--- Geometria: MultiPolygon SRID 4674 (SIRGAS 2000) — mesmo SRID do job CAR.
+-- DSP administrative units (contract aligned with backend + CAR).
+-- Tables: dsp.territory_level_1 / _2 / _3
+-- Columns: id, name, geometry; child rows use parent_id.
+-- Geometry: MultiPolygon SRID 4674 (SIRGAS 2000) — same SRID as the CAR job.
 
 CREATE SCHEMA IF NOT EXISTS dsp;
 
@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_territory_level_3_geometry
 CREATE INDEX IF NOT EXISTS idx_territory_level_3_parent_id
     ON dsp.territory_level_3 (parent_id);
 
-COMMENT ON SCHEMA dsp IS 'Schema operacional do RER DSP';
-COMMENT ON TABLE dsp.territory_level_1 IS 'Unidade administrativa — nível 1';
-COMMENT ON TABLE dsp.territory_level_2 IS 'Unidade administrativa — nível 2 (parent = level 1)';
-COMMENT ON TABLE dsp.territory_level_3 IS 'Unidade administrativa — nível 3 (parent = level 2)';
+COMMENT ON SCHEMA dsp IS 'RER DSP operational schema';
+COMMENT ON TABLE dsp.territory_level_1 IS 'Administrative unit — level 1';
+COMMENT ON TABLE dsp.territory_level_2 IS 'Administrative unit — level 2 (parent = level 1)';
+COMMENT ON TABLE dsp.territory_level_3 IS 'Administrative unit — level 3 (parent = level 2)';

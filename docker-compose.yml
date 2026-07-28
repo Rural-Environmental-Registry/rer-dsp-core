@@ -14,7 +14,7 @@
 
 services:
   # ---------------------------------------------------------------------------
-  # DSP DB — base operacional PostGIS (levels 1–3)
+  # DSP DB — operational PostGIS database (levels 1–3)
   # ---------------------------------------------------------------------------
   dsp-db:
     image: postgis/postgis:16-3.4
@@ -39,7 +39,7 @@ services:
       - dsp_network
 
   # ---------------------------------------------------------------------------
-  # Job migration DB — metadados Spring Batch (BATCH_*)
+  # Job migration DB — Spring Batch metadata (BATCH_*)
   # ---------------------------------------------------------------------------
   dsp-job-migration-db:
     image: postgres:16
@@ -64,8 +64,8 @@ services:
       - dsp_network
 
   # ---------------------------------------------------------------------------
-  # Job data-migration — one-shot (disparado por start.sh quando
-  # DSP_RUN_MIGRATION=true). Não sobe com `docker compose up` padrão.
+  # Job data-migration — one-shot (started by start.sh when
+  # DSP_RUN_MIGRATION=true). Does not start with plain `docker compose up`.
   # ---------------------------------------------------------------------------
   dsp-job-migration:
     image: dsp-job-migration:local
