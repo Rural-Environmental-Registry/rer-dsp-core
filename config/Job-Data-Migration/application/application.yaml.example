@@ -43,6 +43,15 @@ spring:
         maximum-pool-size: 20
         minimum-idle: 5
         pool-name: target-pool
+    geo-target:
+      url: jdbc:postgresql://dsp-geoserver-exhibition-db:5432/dsp-geoserver-exhibition-db
+      username: dsp_geo
+      password: dsp_geo
+      driver-class-name: org.postgresql.Driver
+      hikari:
+        maximum-pool-size: 20
+        minimum-idle: 5
+        pool-name: geo-target-pool
   batch:
     job:
       enabled: false

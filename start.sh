@@ -393,6 +393,38 @@ wait_for_db() {
   return 1
 }
 
+validate_positive_integer() {
+  local label="$1"
+  local value="$2"
+  if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    error "${label}: srid must be a positive integer (got '${value:-<missing>}')"
+    exit 1
+  fi
+}
+
+# Reads the SRID from each job in application.yaml and exports LAYER_SRS_* variables to GeoServer.
+export_layer_srids_from_migration_config() {
+  local cfg="$1"
+  local srid_l1 srid_l2 srid_l3 srid_aoi
+
+  srid_l1="$(yaml_scalar "$cfg" "level-1" "srid")"
+  srid_l2="$(yaml_scalar "$cfg" "level-2" "srid")"
+  srid_l3="$(yaml_scalar "$cfg" "level-3" "srid")"
+  srid_aoi="$(yaml_scalar "$cfg" "area-of-interest" "srid")"
+
+  validate_positive_integer "batch.admin-unit.level-1.srid" "$srid_l1"
+  validate_positive_integer "batch.admin-unit.level-2.srid" "$srid_l2"
+  validate_positive_integer "batch.admin-unit.level-3.srid" "$srid_l3"
+  validate_positive_integer "batch.area-of-interest.srid" "$srid_aoi"
+
+  export LAYER_SRS_TERRITORY_LEVEL_1="EPSG:${srid_l1}"
+  export LAYER_SRS_TERRITORY_LEVEL_2="EPSG:${srid_l2}"
+  export LAYER_SRS_TERRITORY_LEVEL_3="EPSG:${srid_l3}"
+  export LAYER_SRS_AREA_OF_INTEREST="EPSG:${srid_aoi}"
+
+  ok "Layer SRS from application.yaml: L1=${LAYER_SRS_TERRITORY_LEVEL_1} L2=${LAYER_SRS_TERRITORY_LEVEL_2} L3=${LAYER_SRS_TERRITORY_LEVEL_3} AOI=${LAYER_SRS_AREA_OF_INTEREST}"
+}
+
 # =============================================================================
 # Step 1 — Prerequisites (Docker)
 # =============================================================================
@@ -550,8 +582,8 @@ fi
 # =============================================================================
 step_header 8 "Databases (+ optional migration)"
 
-info "Starting databases (dsp-db, dsp-job-migration-db)..."
-docker compose --env-file .env up -d dsp-db dsp-job-migration-db
+info "Starting databases (dsp-db, dsp-geoserver-exhibition-db, dsp-job-migration-db)..."
+docker compose --env-file .env up -d dsp-db dsp-geoserver-exhibition-db dsp-job-migration-db
 ok "Database containers started"
 
 info "Waiting for databases to become healthy..."
@@ -560,6 +592,12 @@ if ! wait_for_db dsp-db "${DSP_DB_USER:-dsp}" "${DSP_DB_NAME:-dsp-db}"; then
   exit 1
 fi
 ok "dsp-db ready"
+
+if ! wait_for_db dsp-geoserver-exhibition-db "${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}" "${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}"; then
+  error "dsp-geoserver-exhibition-db did not become ready in time."
+  exit 1
+fi
+ok "dsp-geoserver-exhibition-db ready"
 
 if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
   error "dsp-job-migration-db did not become ready in time."
@@ -595,6 +633,9 @@ fi
 # Step 9 — GeoServer Exhibition (WMS)
 # =============================================================================
 step_header 9 "GeoServer Exhibition (WMS map layers)"
+
+info "Reading layer SRS from migration config (application.yaml)..."
+export_layer_srids_from_migration_config "$MIGRATION_CONFIG"
 
 info "Building and starting GeoServer Exhibition..."
 docker compose --env-file .env up -d --build dsp-geoserver-exhibition
@@ -635,10 +676,12 @@ echo "Map layers:            http://${DSP_HTTP_HOST:-localhost}:${DSP_BACKEND_HO
 echo "GeoServer Exhibition:  ${GEOSERVER_PUBLIC_URL}/web/"
 echo "GeoServer WMS:         ${GEOSERVER_PUBLIC_URL}/dsp/wms"
 echo "DSP DB:                localhost:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
+echo "GeoServer Exhibition DB: localhost:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
 echo "Job migration DB:      localhost:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
 echo ""
 echo "Verify tables:"
 echo "  docker compose exec dsp-db psql -U ${DSP_DB_USER:-dsp} -d ${DSP_DB_NAME:-dsp-db} -c '\\dt dsp.*'"
+echo "  docker compose exec dsp-geoserver-exhibition-db psql -U ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo} -d ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db} -c '\\dt dsp.*'"
 echo "  docker compose exec dsp-job-migration-db psql -U ${DSP_JOB_MIGRATION_DB_USER:-dsp_job} -d ${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db} -c '\\dt BATCH*'"
 echo ""
 echo "Run migration later:"

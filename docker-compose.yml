@@ -39,6 +39,31 @@ services:
       - dsp_network
 
   # ---------------------------------------------------------------------------
+  # GeoServer Exhibition DB — geometrias completas para WMS
+  # ---------------------------------------------------------------------------
+  dsp-geoserver-exhibition-db:
+    image: postgis/postgis:16-3.4
+    container_name: dsp-geoserver-exhibition-db
+    restart: unless-stopped
+    ports:
+      - "${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}:5432"
+    environment:
+      POSTGRES_DB: ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}
+      POSTGRES_USER: ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}
+      POSTGRES_PASSWORD: ${DSP_GEOSERVER_EXHIBITION_DB_PASSWORD:-dsp_geo}
+    volumes:
+      - dsp_geoserver_exhibition_db_data:/var/lib/postgresql/data
+      - ./config/db/dsp-geoserver-exhibition-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - dsp_network
+
+  # ---------------------------------------------------------------------------
   # Job migration DB — metadados Spring Batch (BATCH_*)
   # ---------------------------------------------------------------------------
   dsp-job-migration-db:
@@ -85,6 +110,8 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       dsp-db:
+        condition: service_healthy
+      dsp-geoserver-exhibition-db:
         condition: service_healthy
       dsp-job-migration-db:
         condition: service_healthy
@@ -147,20 +174,24 @@ services:
       CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,HEAD,OPTIONS
       CORS_ALLOWED_HEADERS: "*"
       GEOSERVER_URL: http://localhost:8080/geoserver
-      DB_HOST: dsp-db
+      DB_HOST: dsp-geoserver-exhibition-db
       DB_PORT: "5432"
-      DB_NAME: ${DSP_DB_NAME:-dsp-db}
+      DB_NAME: ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}
       DB_SCHEMA: dsp
-      DB_USER: ${DSP_DB_USER:-dsp}
-      DB_PASSWORD: ${DSP_DB_PASSWORD:-dsp}
+      DB_USER: ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}
+      DB_PASSWORD: ${DSP_GEOSERVER_EXHIBITION_DB_PASSWORD:-dsp_geo}
       WORKSPACE_NAME: dsp
-      DATASTORE_NAME: dsp-db
+      DATASTORE_NAME: dsp-geoserver-exhibition-db
       MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
+      LAYER_SRS_TERRITORY_LEVEL_1: ${LAYER_SRS_TERRITORY_LEVEL_1}
+      LAYER_SRS_TERRITORY_LEVEL_2: ${LAYER_SRS_TERRITORY_LEVEL_2}
+      LAYER_SRS_TERRITORY_LEVEL_3: ${LAYER_SRS_TERRITORY_LEVEL_3}
+      LAYER_SRS_AREA_OF_INTEREST: ${LAYER_SRS_AREA_OF_INTEREST}
     volumes:
       - dsp_geoserver_exhibition_data:/var/geoserver/datadir
       - ./config/map/mapLayersConfig.json:/config/mapLayersConfig.json:ro
     depends_on:
-      dsp-db:
+      dsp-geoserver-exhibition-db:
         condition: service_healthy
     networks:
       - dsp_network
@@ -189,5 +220,6 @@ networks:
 
 volumes:
   dsp_db_data:
+  dsp_geoserver_exhibition_db_data:
   dsp_job_migration_db_data:
   dsp_geoserver_exhibition_data:

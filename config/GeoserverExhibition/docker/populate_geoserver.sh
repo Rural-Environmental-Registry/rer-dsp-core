@@ -13,15 +13,29 @@ GEOSERVER_PASSWORD="${GEOSERVER_ADMIN_PASSWORD:-geoserver}"
 WORKSPACE_NAME="${WORKSPACE_NAME:-dsp}"
 DATASTORE_NAME="${DATASTORE_NAME:-dsp-db}"
 
-DB_HOST="${DB_HOST:-dsp-db}"
+DB_HOST="${DB_HOST:-dsp-geoserver-exhibition-db}"
 DB_PORT="${DB_PORT:-5432}"
-DB_NAME="${DB_NAME:-dsp-db}"
+DB_NAME="${DB_NAME:-dsp-geoserver-exhibition-db}"
 DB_SCHEMA="${DB_SCHEMA:-dsp}"
-DB_USER="${DB_USER:-dsp}"
-DB_PASSWORD="${DB_PASSWORD:-dsp}"
+DB_USER="${DB_USER:-dsp_geo}"
+DB_PASSWORD="${DB_PASSWORD:-dsp_geo}"
 
-SRS="${GEOSERVER_SRS:-EPSG:4674}"
 MAP_LAYERS_CONFIG="${MAP_LAYERS_CONFIG:-/config/mapLayersConfig.json}"
+
+require_layer_srs() {
+  local env_name=$1
+  local value=$2
+  if [ -z "$value" ]; then
+    echo "Environment variable '${env_name}' is required (EPSG code for layer SRS)."
+    echo "Set it via start.sh (reads srid from application.yaml) or export manually."
+    exit 1
+  fi
+}
+
+require_layer_srs "LAYER_SRS_TERRITORY_LEVEL_1" "${LAYER_SRS_TERRITORY_LEVEL_1:-}"
+require_layer_srs "LAYER_SRS_TERRITORY_LEVEL_2" "${LAYER_SRS_TERRITORY_LEVEL_2:-}"
+require_layer_srs "LAYER_SRS_TERRITORY_LEVEL_3" "${LAYER_SRS_TERRITORY_LEVEL_3:-}"
+require_layer_srs "LAYER_SRS_AREA_OF_INTEREST" "${LAYER_SRS_AREA_OF_INTEREST:-}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq is required to read mapLayersConfig.json colors."
@@ -256,6 +270,12 @@ publish_layer() {
   local layer_name=$1
   local table_name=$2
   local style_name=$3
+  local srs=$4
+
+  if [ -z "$srs" ]; then
+    echo "SRS is required to publish layer '${layer_name}'"
+    exit 1
+  fi
 
   local status
   status=$(rest_status "GET" "/rest/layers/${WORKSPACE_NAME}:${layer_name}")
@@ -274,14 +294,14 @@ publish_layer() {
     "nativeName": "${table_name}",
     "title": "${layer_name}",
     "enabled": true,
-    "srs": "${SRS}",
+    "srs": "${srs}",
     "projectionPolicy": "FORCE_DECLARED",
     "nativeBoundingBox": {
       "minx": -74.0,
       "maxx": -34.0,
       "miny": -34.0,
       "maxy": 6.0,
-      "crs": "${SRS}"
+      "crs": "${srs}"
     },
     "latLonBoundingBox": {
       "minx": -74.0,
@@ -302,7 +322,7 @@ EOF
   if [ "$status_code" != "201" ]; then
     echo "Failed to publish layer '${layer_name}' (HTTP ${status_code})"
     echo "$response" | head -n -1
-    echo "Check: table ${DB_SCHEMA}.${table_name} exists and has geometry (dsp-db init SQL + migration)."
+    echo "Check: table ${DB_SCHEMA}.${table_name} exists and has geometry (exhibition-db init SQL + migration)."
     return 1
   fi
 
@@ -317,6 +337,7 @@ sync_layer_from_config() {
   local table_name=$3
   local style_name=$4
   local stroke_width=$5
+  local srs=$6
 
   local style_tsv stroke_color fill_color sld
   style_tsv=$(layer_style_values "$wms_id")
@@ -335,7 +356,7 @@ sync_layer_from_config() {
   echo "  ${wms_id}: color=${stroke_color} fillColor=${fill_color}"
   sld=$(build_polygon_sld "$style_name" "$stroke_color" "$fill_color" "$stroke_width")
   ensure_style "$style_name" "$sld"
-  publish_layer "$layer_name" "$table_name" "$style_name"
+  publish_layer "$layer_name" "$table_name" "$style_name" "$srs"
 }
 
 echo "=== DSP GeoServer Exhibition populate ==="
@@ -349,10 +370,10 @@ ensure_datastore
 
 echo ""
 echo "=== Syncing styles and layers from mapLayersConfig.json ==="
-sync_layer_from_config "dsp:territory-level-1" "territory-level-1" "territory_level_1" "dsp_territory_level_1" "1.5"
-sync_layer_from_config "dsp:territory-level-2" "territory-level-2" "territory_level_2" "dsp_territory_level_2" "1.5"
-sync_layer_from_config "dsp:territory-level-3" "territory-level-3" "territory_level_3" "dsp_territory_level_3" "1.5"
-sync_layer_from_config "dsp:area-of-interest" "area-of-interest" "area_of_interest" "dsp_area_of_interest" "1"
+sync_layer_from_config "dsp:territory-level-1" "territory-level-1" "territory_level_1" "dsp_territory_level_1" "1.5" "${LAYER_SRS_TERRITORY_LEVEL_1}"
+sync_layer_from_config "dsp:territory-level-2" "territory-level-2" "territory_level_2" "dsp_territory_level_2" "1.5" "${LAYER_SRS_TERRITORY_LEVEL_2}"
+sync_layer_from_config "dsp:territory-level-3" "territory-level-3" "territory_level_3" "dsp_territory_level_3" "1.5" "${LAYER_SRS_TERRITORY_LEVEL_3}"
+sync_layer_from_config "dsp:area-of-interest" "area-of-interest" "area_of_interest" "dsp_area_of_interest" "1" "${LAYER_SRS_AREA_OF_INTEREST}"
 
 echo ""
 echo "Done. WMS: ${GEOSERVER_URL}/${WORKSPACE_NAME}/wms"

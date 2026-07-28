@@ -10,16 +10,35 @@ WMS service for the DSP map UI. Built and started by `./start.sh` as Compose ser
 | WMS | http://localhost:22668/geoserver/dsp/wms |
 | Admin | `admin` / `geoserver` (`DSP_GEOSERVER_ADMIN_*`) |
 
-Port: `DSP_GEOSERVER_HOST_PORT` (default `22668`).
+Port: `DSP_GEOSERVER_HOST_PORT` (default **22668**).
+
+## Database
+
+GeoServer Exhibition reads **only** `dsp-geoserver-exhibition-db` — not `dsp-db`.
+
+| Env var (populate) | Value |
+| --- | --- |
+| `DB_HOST` | `dsp-geoserver-exhibition-db` |
+| `DB_PORT` | `5432` |
+| `DB_NAME` | `dsp-geoserver-exhibition-db` (default) |
+| `DB_SCHEMA` | `dsp` |
+
+Tables and data come from init SQL (`config/db/dsp-geoserver-exhibition-db/`) and the migration job dual-write (`spring.datasource.geo-target`).
+
+## SRS por layer
+
+Native SRS of each layer follows the job YAML `srid` for that table — **not** hardcoded in populate or DDL. Example: CAR jobs use `srid: 4674`; other installations may use `4326`.
+
+When validating, check `ST_SRID(geometry)` in exhibition-db against the YAML `srid` of the corresponding job block.
 
 ## Build
 
 - Dockerfile: [`config/GeoserverExhibition/docker/Dockerfile`](../config/GeoserverExhibition/docker/Dockerfile)
 - Base image: `docker.osgeo.org/geoserver:3.0.0`
-- Populate: `/opt/populate_geoserver.sh` (workspace `dsp`, PostGIS datastore → `dsp-db`)
+- Populate: `/opt/populate_geoserver.sh` (workspace `dsp`, PostGIS datastore → `dsp-geoserver-exhibition-db`)
 - Map config mount: `config/map/mapLayersConfig.json` → `/config/mapLayersConfig.json`
 
-GeoServer does **not** create database tables. Tables come from [`config/db/dsp-db/`](../config/db/dsp-db/); data from the migration job.
+GeoServer does **not** create database tables. Tables come from [`config/db/dsp-geoserver-exhibition-db/`](../config/db/dsp-geoserver-exhibition-db/); data from the migration job.
 
 ## Layer name contract (three sides)
 
@@ -43,7 +62,7 @@ Style names created by populate:
 
 Re-running populate updates existing styles when colors change in the active JSON.
 
-See also [map-layers-config.md](map-layers-config.md).
+See also [map-layers-config.md](map-layers-config.md) · [databases.md](databases.md).
 
 ## Manual commands
 
