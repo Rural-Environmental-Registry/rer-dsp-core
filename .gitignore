@@ -5,6 +5,7 @@
 
 config/installation/installation-config.json
 config/map/mapLayersConfig.json
+config/Job-Data-Migration/application/application.yaml
 
 # IDEs
 .idea/

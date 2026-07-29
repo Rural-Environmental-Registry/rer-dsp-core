@@ -22,15 +22,16 @@ spring:
         connection-test-query: SELECT 1
     source:
       # CAR host reachable from the container network (VPN/DNS on the host).
-      url: jdbc:postgresql://source-db-host:5433/car_nacional
-      username: postgres
-      password: postgres
+      url: jdbc:postgresql://host.docker.internal:6333/car_nacional
+      username: car_nacional
+      password: car_nacional
       driver-class-name: org.postgresql.Driver
       hikari:
         maximum-pool-size: 20
         minimum-idle: 5
         pool-name: source-pool
     target:
+      # Banco operacional da API (bbox/centroide — sem geometria completa)
       url: jdbc:postgresql://dsp-db:5432/dsp-db
       username: dsp
       password: dsp
@@ -39,6 +40,16 @@ spring:
         maximum-pool-size: 20
         minimum-idle: 5
         pool-name: target-pool
+    geo-target:
+      # Banco do GeoServer Exhibition (geometria completa para o mapa WMS)
+      url: jdbc:postgresql://dsp-geoserver-exhibition-db:5432/dsp-geoserver-exhibition-db
+      username: dsp_geo
+      password: dsp_geo
+      driver-class-name: org.postgresql.Driver
+      hikari:
+        maximum-pool-size: 20
+        minimum-idle: 5
+        pool-name: geo-target-pool
   batch:
     job:
       enabled: false

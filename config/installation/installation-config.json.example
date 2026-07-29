@@ -22,7 +22,10 @@
   "screens": {
     "home": {
       "title": "Browse registered data",
-      "hierarchyKeys": ["level2", "level3"],
+      "hierarchyKeys": [
+        "level2",
+        "level3"
+      ],
       "identifier": {
         "key": "identifier",
         "label": "Identifier",
@@ -45,7 +48,11 @@
     },
     "downloads": {
       "title": "Download public data",
-      "hierarchyKeys": ["level1", "level2", "level3"],
+      "hierarchyKeys": [
+        "level1",
+        "level2",
+        "level3"
+      ],
       "identifier": null,
       "theme": {
         "key": "theme",
@@ -71,8 +78,8 @@
         "required": true
       },
       {
-        "code": "LEGAL_RESERVE",
-        "label": "Legal reserve",
+        "code": "THEME_1",
+        "label": "Theme 1",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#C1D2F2",
@@ -80,8 +87,8 @@
         "required": false
       },
       {
-        "code": "PERMANENT_PRESERVATION_AREA",
-        "label": "Permanent preservation area",
+        "code": "THEME_2",
+        "label": "Theme 2",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#98B7EC",
@@ -89,8 +96,8 @@
         "required": false
       },
       {
-        "code": "NATIVE_VEGETATION",
-        "label": "Native vegetation",
+        "code": "THEME_3",
+        "label": "Theme 3",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#97CCE3",
@@ -98,8 +105,8 @@
         "required": false
       },
       {
-        "code": "CONSOLIDATED_AREA",
-        "label": "Consolidated area",
+        "code": "THEME_4",
+        "label": "Theme 4",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#B6C3D9",

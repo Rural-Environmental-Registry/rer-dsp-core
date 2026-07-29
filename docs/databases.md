@@ -19,9 +19,10 @@ O banco **source** fica fora do core — configure `spring.datasource.source` em
 | `dsp.territory_level_1` | `id`, `name`, `boundary_box`, `centroid_coordinates` |
 | `dsp.territory_level_2` | `id`, `name`, `parent_id` → level_1, `boundary_box`, `centroid_coordinates` |
 | `dsp.territory_level_3` | `id`, `name`, `parent_id` → level_2, `boundary_box`, `centroid_coordinates` |
-| `dsp.area_of_interest` | `id`, `registration_date`, `alteration_date`, `territory_level_3_id`, `area`, `boundary_box`, `centroid_coordinates` |
+| `dsp.area_of_interest` | `id`, datas, `territory_level_3_id`, `area`, `theme_1`…`theme_4`, `boundary_box`, `centroid_coordinates` |
 
-Colunas geo: `geometry(Polygon)` para `boundary_box`, `geometry(Point)` para `centroid_coordinates`. **Sem** coluna `geometry` de polígono completo.
+KPI measures: `area` + `theme_1`…`theme_4` (números). Labels dos temas vêm do `installation-config` (`THEME_1`…).  
+Colunas geo operacionais: `boundary_box` (Polygon) e `centroid_coordinates` (Point). **Sem** polígono completo (fica no exhibition-db).
 
 ## Schema `dsp` — exhibition-db
 

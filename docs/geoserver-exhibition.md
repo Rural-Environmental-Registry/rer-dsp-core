@@ -35,8 +35,15 @@ When validating, check `ST_SRID(geometry)` in exhibition-db against the YAML `sr
 
 - Dockerfile: [`config/GeoserverExhibition/docker/Dockerfile`](../config/GeoserverExhibition/docker/Dockerfile)
 - Base image: `docker.osgeo.org/geoserver:3.0.0`
+- Compose build uses `network: host` so `apt-get` can resolve Ubuntu mirrors (BuildKit bridge DNS sometimes fails locally).
 - Populate: `/opt/populate_geoserver.sh` (workspace `dsp`, PostGIS datastore → `dsp-geoserver-exhibition-db`)
 - Map config mount: `config/map/mapLayersConfig.json` → `/config/mapLayersConfig.json`
+
+Manual build if needed:
+
+```bash
+docker build --network=host -t dsp-geoserver-exhibition:local ./config/GeoserverExhibition/docker
+```
 
 GeoServer does **not** create database tables. Tables come from [`config/db/dsp-geoserver-exhibition-db/`](../config/db/dsp-geoserver-exhibition-db/); data from the migration job.
 
