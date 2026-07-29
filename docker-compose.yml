@@ -97,6 +97,7 @@ services:
     build:
       context: ${DSP_JOB_MIGRATION_PATH:-../rer-dsp-job-data-migration}
       dockerfile: Dockerfile
+      network: host
     container_name: dsp-job-migration
     profiles:
       - migration

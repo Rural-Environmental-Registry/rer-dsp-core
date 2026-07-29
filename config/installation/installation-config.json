@@ -79,7 +79,7 @@
       },
       {
         "code": "THEME_1",
-        "label": "Tema 1",
+        "label": "Reserva legal",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#C1D2F2",
@@ -88,7 +88,7 @@
       },
       {
         "code": "THEME_2",
-        "label": "Tema 2",
+        "label": "APP",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#98B7EC",
@@ -97,7 +97,7 @@
       },
       {
         "code": "THEME_3",
-        "label": "Tema 3",
+        "label": "Vegetação nativa",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#97CCE3",
@@ -106,7 +106,7 @@
       },
       {
         "code": "THEME_4",
-        "label": "Tema 4",
+        "label": "Área consolidada",
         "unitOfMeasurement": "ha",
         "optionalLabel": null,
         "accentColor": "#B6C3D9",
