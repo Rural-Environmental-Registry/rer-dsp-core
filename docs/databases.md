@@ -62,12 +62,15 @@ O backend usa `spring.jpa.hibernate.ddl-auto=none` — o DDL fica só no init SQ
 
 ```bash
 docker compose down -v
-./start.sh
+./setup.sh    # remigra / repovoa
+./start.sh    # sobe as apps
 ```
 
 ## Migração
 
-Com `DSP_RUN_MIGRATION=true`, o `start.sh` sobe os DBs, executa `dsp-job-migration` (dual-write em `dsp-db` + `exhibition-db`) e sobe FE/BE.
+O `./setup.sh` sobe os DBs, executa `dsp-job-migration` (dual-write em `dsp-db` + `exhibition-db`) e publica layers no GeoServer. Os dados ficam nos volumes Docker.
+
+O `./start.sh` **não** remigra — só sobe a stack (DBs já existentes + GeoServer + FE/BE).
 
 YAML: `config/Job-Data-Migration/application/application.yaml` — inclui `spring.datasource.target`, `spring.datasource.geo-target` e `srid` por job.
 

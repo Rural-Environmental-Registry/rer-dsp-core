@@ -1,12 +1,4 @@
-# Example = copy of the active application.yaml (CAR → dsp.*). Edit application.yaml or this file and keep them synchronized.
-
-# Migration job assembled by the core (Compose → /config/application.yaml).
-# CAR Nacional mapping (usr_geocar_aplicacao) → dsp.territory_level_* + area_of_interest.
-# Mapping source: DSP/application.yaml (provided by a colleague).
-#
-# JDBC connections (batch, target, source) and ETL mapping are defined in this file.
-# Docker hosts: batch → dsp-job-migration-db, target → dsp-db.
-# External source: host.docker.internal (local testing) or the adopter's VPN/DNS.
+# Template for application.yaml — edit application.yaml for your adopter source and ETL mapping.
 
 spring:
   application:
@@ -26,9 +18,9 @@ spring:
         connection-test-query: SELECT 1
     source:
       # CAR host reachable from the container network (VPN/DNS on the host).
-      url: jdbc:postgresql://source-db-host:5433/car_nacional
-      username: postgres
-      password: postgres
+      url: ${DSP_SOURCE_JDBC_URL}
+      username: ${DSP_SOURCE_JDBC_USERNAME}
+      password: ${DSP_SOURCE_JDBC_PASSWORD}
       driver-class-name: org.postgresql.Driver
       hikari:
         maximum-pool-size: 20
@@ -110,7 +102,7 @@ batch:
         te_nome_regiao: name
         geo_localizacao: geometry
       layer-name: territory-level-1
-      srid: 4674
+      srid: ${LAYER_SRS_TERRITORY_LEVEL_1:4674}
       change-detection-strategy: DEFAULT
     level-2:
       source-table: usr_geocar_aplicacao.estado
@@ -149,7 +141,7 @@ batch:
         id_regiao: parent_id
         geo_localizacao: geometry
       layer-name: territory-level-2
-      srid: 4674
+      srid: ${LAYER_SRS_TERRITORY_LEVEL_3:4674}
       change-detection-strategy: DEFAULT
     level-3:
       source-table: usr_geocar_aplicacao.municipio
@@ -187,7 +179,7 @@ batch:
         cod_estado: parent_id
         geo_localizacao: geometry
       layer-name: territory-level-3
-      srid: 4674
+      srid: ${LAYER_SRS_TERRITORY_LEVEL_3:4674}
       change-detection-strategy: DEFAULT
   area-of-interest:
     # Subquery: property + CAR theme areas for KPI theme_1..theme_4 (dsp-db only).
@@ -265,7 +257,7 @@ batch:
       src_theme_3: theme_3
       src_theme_4: theme_4
     layer-name: area-of-interest
-    srid: 4674
+    srid: ${LAYER_SRS_AREA_OF_INTEREST:4674}
     change-detection-strategy: DEFAULT
 
 parallelization:

@@ -21,7 +21,7 @@ The backend does **not** package this JSON in the jar.
 
 1. If `installation-config.json` is missing, `start.sh` copies it from `.example` and exits.
 2. If the active file is still identical to `.example`, startup is **blocked** until you edit hierarchy labels, screens, KPIs, and formats.
-3. After edits, restart the stack (re-run `./start.sh`).
+3. After edits, re-run `./start.sh` (app stack). Data migration stays in `./setup.sh`.
 
 ## Shape
 

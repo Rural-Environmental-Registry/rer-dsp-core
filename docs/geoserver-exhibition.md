@@ -1,6 +1,6 @@
 # GeoServer Exhibition
 
-WMS service for the DSP map UI. Built and started by `./start.sh` as Compose service `dsp-geoserver-exhibition`.
+WMS service for the DSP map UI. Compose service `dsp-geoserver-exhibition`: layers are published by `./setup.sh`; the container is started by `./setup.sh` and `./start.sh`.
 
 ## Endpoints (local defaults)
 
@@ -57,7 +57,7 @@ GeoServer does **not** create database tables. Tables come from [`config/db/dsp-
 | `dsp.area_of_interest` | `dsp:area-of-interest` | `area-of-interest` |
 
 - **Populate** publishes fixed FeatureTypes and syncs SLD colors from the mounted `mapLayersConfig.json`.
-- **`mapLayersConfig.json`** must keep those four `layers` ids and valid `style.color` / `style.fillColor` — validated by `./start.sh`.
+- **`mapLayersConfig.json`** must keep those four `layers` ids and valid `style.color` / `style.fillColor` — validated by `./setup.sh` and `./start.sh`.
 - **Job `layer-name`** identifies the published layer for future GeoServer cache invalidation (`GeoCacheUpdateListener`).
 
 Style names created by populate:

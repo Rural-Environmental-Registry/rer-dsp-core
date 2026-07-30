@@ -14,8 +14,8 @@ O `rer-dsp-core` é o **hub de instalação** da stack DSP (mesmo papel do `core
 - Exemplos de configuração do adotante (hierarquia, telas, KPIs, camadas do mapa)
 - Init SQL e Docker Compose para bancos `dsp-db` e `dsp-job-migration-db`
 - GeoServer Exhibition (WMS do mapa)
-- Job de migração opcional (`DSP_RUN_MIGRATION=true`)
-- Docker Compose para subir backend + frontend localmente
+- `./setup.sh` — migração de dados + populate (uma vez; dados nos volumes Docker)
+- `./start.sh` — sobe backend + frontend + GeoServer (dia a dia; **não** remigra)
 
 O código das aplicações fica nos repositórios irmãos. Este repo **não** é uma biblioteca Java de domínio.
 
@@ -39,23 +39,23 @@ Pré-requisitos: Docker 24+ com Compose v2.
 ```bash
 cd rer-dsp-core
 cp .env.example .env
-chmod +x ./start.sh
-./start.sh
+chmod +x ./setup.sh ./start.sh
 ```
 
-Na primeira execução, o `./start.sh` cria os arquivos de configuração a partir dos templates e **interrompe** até você editá-los:
+Edite (os scripts criam a partir dos `.example` e **interrompem** se ainda forem idênticos ao template):
 
 - `config/installation/installation-config.json` — labels da UI, telas, KPIs
 - `config/map/mapLayersConfig.json` — camadas WMS do GeoServer
-
-Execute `./start.sh` novamente após editar os dois arquivos.
-
-Com migração a partir do banco externo do adotante:
+- `config/Job-Data-Migration/application/application.yaml` — JDBC + mapeamento ETL (para migrar)
 
 ```bash
-# Edite config/Job-Data-Migration/application/application.yaml (JDBC + mapeamento ETL)
-DSP_RUN_MIGRATION=true ./start.sh
+./setup.sh    # bancos + migração + publish GeoServer (dados ficam nos volumes)
+./start.sh    # sobe a aplicação (não remigra)
 ```
+
+UI sem dados do CAR: `./setup.sh --skip-migration` e depois `./start.sh`.
+
+Ajuste só no frontend: `docker compose up -d --build dsp-frontend` (não use `down -v`).
 
 | Serviço | URL / porta padrão |
 | --- | --- |
@@ -78,20 +78,21 @@ docker compose exec dsp-job-migration-db psql -U dsp_job -d dsp-job-migration-db
 Parar / recriar bancos:
 
 ```bash
-docker compose down
-docker compose down -v   # reaplica init SQL
+docker compose down              # para containers; mantém volumes (dados)
+docker compose down -v           # apaga volumes — depois rode ./setup.sh de novo
 ```
 
 ## Configuração
 
 | Caminho | Função |
 | --- | --- |
-| [`.env.example`](.env.example) | Portas, DBs, `DSP_RUN_MIGRATION` |
+| [`.env.example`](.env.example) | Portas, DBs, `DSP_SKIP_MIGRATION` |
+| [`setup.sh`](setup.sh) / [`start.sh`](start.sh) | Setup (dados) vs start (apps) — ver [scripts/README.md](scripts/README.md) |
 | [`config/db/dsp-db/`](config/db/dsp-db/) | Init SQL PostGIS + `dsp.territory_level_*` + `dsp.area_of_interest` |
 | [`config/db/dsp-job-migration-db/`](config/db/dsp-job-migration-db/) | Init SQL `BATCH_*` |
 | [`config/Job-Data-Migration/application/application.yaml`](config/Job-Data-Migration/application/application.yaml) | Conexões JDBC + mapeamento ETL do job |
-| [`config/installation/installation-config.json.example`](config/installation/installation-config.json.example) | Template: hierarquia, telas, KPIs (arquivo ativo criado pelo `start.sh`) |
-| [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: camadas WMS / GeoServer (arquivo ativo criado pelo `start.sh`) |
+| [`config/installation/installation-config.json.example`](config/installation/installation-config.json.example) | Template: hierarquia, telas, KPIs |
+| [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: camadas WMS / GeoServer |
 | [`config/GeoserverExhibition/docker/`](config/GeoserverExhibition/docker/) | Imagem GeoServer Exhibition + script de populate |
 
 Veja também [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md) e [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).

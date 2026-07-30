@@ -19,17 +19,17 @@ DSP_MAP_LAYERS_FILE=file:/config/mapLayersConfig.json
 
 The backend does **not** require this JSON to be packaged in the jar when running via Docker Compose.
 
-## First run (`./start.sh`)
+## First run (`./setup.sh` / `./start.sh`)
 
-1. If `mapLayersConfig.json` is missing, `start.sh` copies it from `.example` and exits.
-2. If the active file is still identical to `.example`, startup is **blocked** until you edit it (e.g. `baseUrl`, display names, or colors).
-3. `start.sh` **validates** that these four WMS layer ids are present (do not rename them):
+1. If `mapLayersConfig.json` is missing, the script copies it from `.example` and exits.
+2. If the active file is still identical to `.example`, the script **blocks** until you edit it (e.g. `baseUrl`, display names, or colors).
+3. Both scripts **validate** that these four WMS layer ids are present (do not rename them):
    - `dsp:territory-level-1`
    - `dsp:territory-level-2`
    - `dsp:territory-level-3`
    - `dsp:area-of-interest`
-4. `start.sh` also validates `style.color` / `style.fillColor` on those four layers and **prints each layer with its colors** before confirmation.
-5. After edits, re-run `./start.sh`. GeoServer Exhibition publishes the FeatureTypes and syncs SLD colors from this same file.
+4. They also validate `style.color` / `style.fillColor` on those four layers and **print each layer with its colors** before confirmation.
+5. After edits, run `./setup.sh` so GeoServer Exhibition publishes FeatureTypes and syncs SLD colors. Day-to-day use `./start.sh` (does not re-publish).
 
 ## Shape
 

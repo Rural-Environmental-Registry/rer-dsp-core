@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Publishes DSP workspace/datastore/layers on GeoServer Exhibition via REST.
-# Fixed FeatureTypes aligned with mapLayersConfig + job layer-name contract.
-# Styles (colors) are read from the mounted mapLayersConfig.json.
-# Does not CREATE database tables — only publishes existing PostGIS tables.
+# Usage: run via ./setup.sh (publishes layers from mapLayersConfig.json)
 
 set -euo pipefail
 
@@ -27,7 +24,7 @@ require_layer_srs() {
   local value=$2
   if [ -z "$value" ]; then
     echo "Environment variable '${env_name}' is required (EPSG code for layer SRS)."
-    echo "Set it via start.sh (reads srid from application.yaml) or export manually."
+    echo "Set it via .env (LAYER_SRS_*) and run setup.sh or start.sh, or export manually."
     exit 1
   fi
 }
@@ -48,7 +45,6 @@ if [ ! -f "$MAP_LAYERS_CONFIG" ]; then
   exit 1
 fi
 
-# Returns style.color and style.fillColor for a WMS layer id (workspace:layer).
 layer_style_values() {
   local wms_id=$1
   jq -r --arg id "$wms_id" '
@@ -221,7 +217,6 @@ upload_sld() {
   fi
 }
 
-# Creates the style if missing, then always overwrites SLD from mapLayersConfig colors.
 ensure_style() {
   local style_name=$1
   local sld_content=$2
@@ -330,7 +325,6 @@ EOF
   echo "Layer '${layer_name}' published"
 }
 
-# Reads colors from mapLayersConfig, builds SLD, ensures style, publishes/syncs layer.
 sync_layer_from_config() {
   local wms_id=$1
   local layer_name=$2

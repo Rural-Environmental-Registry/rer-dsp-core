@@ -1,6 +1,4 @@
 #!/bin/bash
-# Adjusts data-dir permissions (volume may be created as root).
-# Runs as root before official startup.sh (RUN_UNPRIVILEGED → UID 999).
 set -e
 
 GEOSERVER_UID="${RUN_WITH_USER_UID:-${GEOSERVER_UID:-999}}"

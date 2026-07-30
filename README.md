@@ -14,8 +14,8 @@
 - Example adopter configuration (hierarchy, screens, KPIs, map layers)
 - Init SQL and Docker Compose for databases `dsp-db` and `dsp-job-migration-db`
 - GeoServer Exhibition (WMS for the map)
-- Optional migration job (`DSP_RUN_MIGRATION=true`)
-- Docker Compose to run backend + frontend locally
+- `./setup.sh` — data migration + GeoServer populate (once; data on Docker volumes)
+- `./start.sh` — starts backend + frontend + GeoServer (day-to-day; **no** remigration)
 
 Application code lives in sibling repositories. This repo does **not** hold domain Java libraries.
 
@@ -39,23 +39,23 @@ Prerequisites: Docker 24+ with Compose v2.
 ```bash
 cd rer-dsp-core
 cp .env.example .env
-chmod +x ./start.sh
-./start.sh
+chmod +x ./setup.sh ./start.sh
 ```
 
-On first run, `./start.sh` creates adopter config files from templates and **stops** until you edit them:
+Edit (scripts create from `.example` and **stop** while files still match the template):
 
 - `config/installation/installation-config.json` — UI labels, screens, KPIs
 - `config/map/mapLayersConfig.json` — GeoServer WMS layers
-
-Re-run `./start.sh` after editing both files.
-
-With migration from the adopter external database:
+- `config/Job-Data-Migration/application/application.yaml` — JDBC + ETL mapping (to migrate)
 
 ```bash
-# Edit config/Job-Data-Migration/application/application.yaml (JDBC + ETL mapping)
-DSP_RUN_MIGRATION=true ./start.sh
+./setup.sh    # databases + migration + GeoServer publish (data stays on volumes)
+./start.sh    # start the application (does not remigrate)
 ```
+
+UI without CAR data: `./setup.sh --skip-migration` then `./start.sh`.
+
+Frontend-only tweak: `docker compose up -d --build dsp-frontend` (do not use `down -v`).
 
 | Service | Default URL / port |
 | --- | --- |
@@ -78,20 +78,21 @@ docker compose exec dsp-job-migration-db psql -U dsp_job -d dsp-job-migration-db
 Stop / recreate databases:
 
 ```bash
-docker compose down
-docker compose down -v   # re-runs init SQL
+docker compose down              # stop containers; keeps volumes (data)
+docker compose down -v           # wipe volumes — then run ./setup.sh again
 ```
 
 ## Configuration
 
 | Path | Purpose |
 | --- | --- |
-| [`.env.example`](.env.example) | Ports, DBs, `DSP_RUN_MIGRATION` |
+| [`.env.example`](.env.example) | Ports, DBs, `DSP_SKIP_MIGRATION` |
+| [`setup.sh`](setup.sh) / [`start.sh`](start.sh) | Setup (data) vs start (apps) — see [scripts/README.md](scripts/README.md) |
 | [`config/db/dsp-db/`](config/db/dsp-db/) | PostGIS init SQL + `dsp.territory_level_*` + `dsp.area_of_interest` |
 | [`config/db/dsp-job-migration-db/`](config/db/dsp-job-migration-db/) | `BATCH_*` init SQL |
 | [`config/Job-Data-Migration/application/application.yaml`](config/Job-Data-Migration/application/application.yaml) | JDBC connections + job ETL mapping |
-| [`config/installation/installation-config.json.example`](config/installation/installation-config.json.example) | Template: hierarchy, screens, KPIs (active file created by `start.sh`) |
-| [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: WMS layers / GeoServer (active file created by `start.sh`) |
+| [`config/installation/installation-config.json.example`](config/installation/installation-config.json.example) | Template: hierarchy, screens, KPIs |
+| [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: WMS layers / GeoServer |
 | [`config/GeoserverExhibition/docker/`](config/GeoserverExhibition/docker/) | GeoServer Exhibition image + populate script |
 
 See also [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md), and [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
