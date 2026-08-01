@@ -70,17 +70,7 @@ fi
 
 step_header 4 "Map layers config (WMS / GeoServer)"
 
-MAP_LAYERS_CONFIG_EXAMPLE="$ROOT_DIR/config/map/mapLayersConfig.json.example"
-MAP_LAYERS_CONFIG="$ROOT_DIR/config/map/mapLayersConfig.json"
-
-ensure_adopter_json_config \
-  "Map layers config" \
-  "$MAP_LAYERS_CONFIG_EXAMPLE" \
-  "$MAP_LAYERS_CONFIG" \
-  "baseUrl / display names / style.color and style.fillColor (keep the four WMS layer ids unchanged)"
-
-print_map_layers_preview "$MAP_LAYERS_CONFIG"
-validate_map_layers_wms_ids "$MAP_LAYERS_CONFIG"
+ensure_map_layers_config
 
 step_header 5 "Migration config (JDBC + ETL)"
 

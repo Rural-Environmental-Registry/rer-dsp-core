@@ -215,6 +215,23 @@ PY
   ok "WMS layer ids and style colors match Exhibition contract"
 }
 
+# Ensures config/map/mapLayersConfig.json exists, is valid JSON, was edited
+# from the template, and keeps the required WMS layer ids/colors. Shared by
+# setup.sh and start.sh so the validation stays identical in both.
+ensure_map_layers_config() {
+  local example="$ROOT_DIR/config/map/mapLayersConfig.json.example"
+  local active="$ROOT_DIR/config/map/mapLayersConfig.json"
+
+  ensure_adopter_json_config \
+    "Map layers config" \
+    "$example" \
+    "$active" \
+    "baseUrl / display names / style.color and style.fillColor (keep the four WMS layer ids unchanged)"
+
+  print_map_layers_preview "$active"
+  validate_map_layers_wms_ids "$active"
+}
+
 wait_for_geoserver() {
   local url="$1"
   local user="$2"
