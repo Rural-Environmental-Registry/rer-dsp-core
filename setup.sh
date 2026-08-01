@@ -29,7 +29,6 @@ for arg in "$@"; do
       echo ""
       echo "Env:"
       echo "  DSP_SKIP_MIGRATION=true   same as --skip-migration"
-      echo "  DSP_RUN_MIGRATION=false   legacy skip (compat)"
       exit 0
       ;;
     *)
@@ -46,12 +45,7 @@ require_docker
 step_header 2 "Environment (.env)"
 ensure_dotenv
 
-if [ "${DSP_SKIP_MIGRATION:-false}" = "true" ]; then
-  SKIP_MIGRATION=true
-fi
-if [ "${DSP_RUN_MIGRATION:-true}" = "false" ]; then
-  SKIP_MIGRATION=true
-fi
+SKIP_MIGRATION="$(should_skip_migration "$SKIP_MIGRATION")"
 
 WILL_MIGRATE=true
 if [ "$SKIP_MIGRATION" = "true" ]; then
@@ -145,7 +139,7 @@ if [ "$WILL_MIGRATE" = "true" ]; then
   docker compose --env-file .env --profile migration run --rm --build dsp-job-migration
   ok "Migration finished"
 else
-  info "Data migration skipped (--skip-migration / DSP_SKIP_MIGRATION / DSP_RUN_MIGRATION=false)."
+  info "Data migration skipped (--skip-migration / DSP_SKIP_MIGRATION=true)."
 fi
 
 step_header 8 "GeoServer Exhibition (publish layers)"

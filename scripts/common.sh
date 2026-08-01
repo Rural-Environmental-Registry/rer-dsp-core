@@ -443,6 +443,27 @@ require_docker() {
   ok "Docker and Docker Compose OK"
 }
 
+# Single source of truth for whether migration should be skipped.
+# Args: $1 = "true"/"false" from the --skip-migration CLI flag (default "false").
+# Reads DSP_SKIP_MIGRATION from the environment (call after ensure_dotenv).
+# Errors out if the legacy DSP_RUN_MIGRATION var is still set, instead of
+# silently honoring it — that triplicity was the source of config drift.
+should_skip_migration() {
+  local cli_flag="${1:-false}"
+
+  if [ -n "${DSP_RUN_MIGRATION+x}" ]; then
+    error "DSP_RUN_MIGRATION is no longer supported."
+    error "Use DSP_SKIP_MIGRATION=true in .env, or ./setup.sh --skip-migration, instead."
+    exit 1
+  fi
+
+  if [ "$cli_flag" = "true" ] || [ "${DSP_SKIP_MIGRATION:-false}" = "true" ]; then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+
 ensure_dotenv() {
   if [ ! -f .env ]; then
     info "Creating .env from .env.example"

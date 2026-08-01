@@ -14,11 +14,7 @@
 ./setup.sh --skip-migration   # só DBs + layers GeoServer, sem ETL
 ```
 
-## GeoServer (legado)
-
-Os scripts temporários de GeoServer nesta pasta estão **deprecated**.
-
-Use o serviço da stack:
+## GeoServer
 
 - Compose: `dsp-geoserver-exhibition`
 - Docs: [docs/geoserver-exhibition.md](../docs/geoserver-exhibition.md)
