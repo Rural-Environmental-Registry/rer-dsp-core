@@ -53,7 +53,7 @@ Edit (scripts create from `.example` and **stop** while files still match the te
 ./start.sh    # start the application (does not remigrate)
 ```
 
-UI without CAR data: `./setup.sh --skip-migration` then `./start.sh`.
+UI without migrated source data: `./setup.sh --skip-migration` then `./start.sh`.
 
 Frontend-only tweak: `docker compose up -d --build dsp-frontend` (do not use `down -v`).
 
@@ -95,7 +95,7 @@ docker compose down -v           # wipe volumes — then run ./setup.sh again
 | [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: WMS layers / GeoServer |
 | [`config/GeoserverExhibition/docker/`](config/GeoserverExhibition/docker/) | GeoServer Exhibition image + populate script |
 
-See also [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md), and [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
+See also [docs/migration-config.md](docs/migration-config.md), [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md), and [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
 
 ## Not in the core yet
 

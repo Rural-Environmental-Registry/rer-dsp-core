@@ -27,7 +27,7 @@ Tables and data come from init SQL (`config/db/dsp-geoserver-exhibition-db/`) an
 
 ## SRS por layer
 
-Native SRS of each layer follows the job YAML `srid` for that table — **not** hardcoded in populate or DDL. Example: CAR jobs use `srid: 4674`; other installations may use `4326`.
+Native SRS of each layer follows the job YAML `srid` for that table — **not** hardcoded in populate or DDL. The generic template defaults to `4326`; set the SRID that matches your source data.
 
 When validating, check `ST_SRID(geometry)` in exhibition-db against the YAML `srid` of the corresponding job block.
 

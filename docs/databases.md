@@ -74,4 +74,6 @@ O `./start.sh` **não** remigra — só sobe a stack (DBs já existentes + GeoSe
 
 YAML: `config/Job-Data-Migration/application/application.yaml` — inclui `spring.datasource.target`, `spring.datasource.geo-target` e `srid` por job.
 
+Como preencher o template ETL: [migration-config.md](migration-config.md).
+
 Contrato transversal: [rer-dsp-docs — Bancos de dados](https://github.com/Rural-Environmental-Registry/rer-dsp-docs/blob/main/docs/architecture/databases.md).

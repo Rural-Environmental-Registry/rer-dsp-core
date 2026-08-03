@@ -53,6 +53,6 @@ Rename only the `label` fields for your country (e.g. Theme 1 → “Legal reser
 1. Run `./start.sh` once to generate the active file from `.example` (or copy manually).
 2. Edit `installation-config.json` — rename hierarchy and KPI labels.
 3. Keep `AREA_OF_INTEREST` as `primaryCode` unless the product contract changes.
-4. Map theme source columns in the migration YAML (`business-only-persist-columns`) when you have theme measures.
+4. Map theme source columns in the migration YAML (`business-only-persist-columns`) when you have theme measures — see [migration-config.md](migration-config.md).
 5. Adjust `formats` and `areaOfInterest` as needed.
 6. Restart backend after edits (config is cached at startup).

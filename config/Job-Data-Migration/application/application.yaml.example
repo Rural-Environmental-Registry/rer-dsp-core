@@ -1,4 +1,5 @@
-# Template for application.yaml — edit application.yaml for your adopter source and ETL mapping.
+# Generic application.yaml template — edit application.yaml with your adopter source and ETL mapping.
+# Guide: docs/migration-config.md
 
 spring:
   application:
@@ -17,10 +18,10 @@ spring:
         pool-name: batch-pool
         connection-test-query: SELECT 1
     source:
-      # CAR host reachable from the container network (VPN/DNS on the host).
+      # Adopter source database (values from .env / Compose).
       url: ${DSP_SOURCE_JDBC_URL}
-      username: ${DSP_SOURCE_JDBC_USERNAME}
-      password: ${DSP_SOURCE_JDBC_PASSWORD}
+      username: ${DSP_SOURCE_DB_USER}
+      password: ${DSP_SOURCE_DB_PASSWORD}
       driver-class-name: org.postgresql.Driver
       hikari:
         maximum-pool-size: 20
@@ -55,209 +56,109 @@ server:
 
 batch:
   admin-unit:
-    # Brazil (installation): L1=region, L2=state, L3=municipality.
+    # Adopter territorial hierarchy: L1 → L2 → L3 (parent_id links to the parent level).
     level-1:
-      # REGIOES has no own geometry: unions geo_localizacao of states in the region.
-      source-table: >-
-        (SELECT r.id_regiao,
-                r.te_nome_regiao,
-                ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_Union(e.geo_localizacao)), 3)) AS geo_localizacao
-         FROM usr_geocar_aplicacao.regioes r
-         INNER JOIN usr_geocar_aplicacao.estado e ON e.id_regiao = r.id_regiao
-         WHERE e.geo_localizacao IS NOT NULL
-         GROUP BY r.id_regiao, r.te_nome_regiao) AS src_l1
+      # Source table or SQL subquery. Replace the placeholders.
+      source-table: <source_schema>.<source_table>
       target-table: dsp.territory_level_1
-      primary-key: id_regiao
-      geometry-column: geo_localizacao
-      # Regions of UFs present in the property sample (up to 12 active per UF).
-      where-clause: >-
-        id_regiao IN (
-          SELECT DISTINCT e.id_regiao
-          FROM usr_geocar_aplicacao.estado e
-          WHERE e.id_regiao IS NOT NULL
-            AND e.cod_estado IN (
-              SELECT DISTINCT m.cod_estado
-              FROM usr_geocar_aplicacao.imovel i
-              INNER JOIN usr_geocar_aplicacao.municipio m ON m.idt_municipio = i.idt_municipio
-              WHERE i.idt_imovel IN (
-                SELECT amostra.idt_imovel
-                FROM (
-                  SELECT i2.idt_imovel,
-                         ROW_NUMBER() OVER (PARTITION BY m2.cod_estado ORDER BY i2.idt_imovel) AS rn
-                  FROM usr_geocar_aplicacao.imovel i2
-                  INNER JOIN usr_geocar_aplicacao.municipio m2 ON m2.idt_municipio = i2.idt_municipio
-                  WHERE i2.flg_ativo = true
-                ) amostra
-                WHERE amostra.rn <= 12
-              )
-            )
-        )
+      primary-key: <source_pk>
+      geometry-column: <source_geom>
+      where-clause: "1=1"
       comparison-columns:
-        - te_nome_regiao
+        - <source_name>
       persist-columns:
-        - id_regiao
-        - te_nome_regiao
+        - <source_pk>
+        - <source_name>
       column-mapping:
-        id_regiao: id
-        te_nome_regiao: name
-        geo_localizacao: geometry
+        <source_pk>: id
+        <source_name>: name
+        <source_geom>: geometry
       layer-name: territory-level-1
-      srid: ${LAYER_SRS_TERRITORY_LEVEL_1:4674}
+      srid: ${LAYER_SRS_TERRITORY_LEVEL_1:4326}
       change-detection-strategy: DEFAULT
     level-2:
-      source-table: usr_geocar_aplicacao.estado
+      source-table: <source_schema>.<source_table>
       target-table: dsp.territory_level_2
-      primary-key: cod_estado
-      partition-column: id_regiao
-      geometry-column: geo_localizacao
-      # UFs present in the same property sample.
-      where-clause: >-
-        cod_estado IN (
-          SELECT DISTINCT m.cod_estado
-          FROM usr_geocar_aplicacao.imovel i
-          INNER JOIN usr_geocar_aplicacao.municipio m ON m.idt_municipio = i.idt_municipio
-          WHERE i.idt_imovel IN (
-            SELECT amostra.idt_imovel
-            FROM (
-              SELECT i2.idt_imovel,
-                     ROW_NUMBER() OVER (PARTITION BY m2.cod_estado ORDER BY i2.idt_imovel) AS rn
-              FROM usr_geocar_aplicacao.imovel i2
-              INNER JOIN usr_geocar_aplicacao.municipio m2 ON m2.idt_municipio = i2.idt_municipio
-              WHERE i2.flg_ativo = true
-            ) amostra
-            WHERE amostra.rn <= 12
-          )
-        )
+      primary-key: <source_pk>
+      # Column used to partition the job in parallel (usually the parent).
+      partition-column: <source_parent_pk>
+      geometry-column: <source_geom>
+      where-clause: "1=1"
       comparison-columns:
-        - nom_estado
-        - id_regiao
+        - <source_name>
+        - <source_parent_pk>
       persist-columns:
-        - cod_estado
-        - nom_estado
-        - id_regiao
+        - <source_pk>
+        - <source_name>
+        - <source_parent_pk>
       column-mapping:
-        cod_estado: id
-        nom_estado: name
-        id_regiao: parent_id
-        geo_localizacao: geometry
+        <source_pk>: id
+        <source_name>: name
+        <source_parent_pk>: parent_id
+        <source_geom>: geometry
       layer-name: territory-level-2
-      srid: ${LAYER_SRS_TERRITORY_LEVEL_3:4674}
+      srid: ${LAYER_SRS_TERRITORY_LEVEL_2:4326}
       change-detection-strategy: DEFAULT
     level-3:
-      source-table: usr_geocar_aplicacao.municipio
+      source-table: <source_schema>.<source_table>
       target-table: dsp.territory_level_3
-      primary-key: idt_municipio
-      partition-column: cod_estado
-      geometry-column: geo_localizacao
-      # Municipalities in the same property sample.
-      where-clause: >-
-        idt_municipio IN (
-          SELECT DISTINCT i.idt_municipio
-          FROM usr_geocar_aplicacao.imovel i
-          WHERE i.idt_imovel IN (
-            SELECT amostra.idt_imovel
-            FROM (
-              SELECT i2.idt_imovel,
-                     ROW_NUMBER() OVER (PARTITION BY m2.cod_estado ORDER BY i2.idt_imovel) AS rn
-              FROM usr_geocar_aplicacao.imovel i2
-              INNER JOIN usr_geocar_aplicacao.municipio m2 ON m2.idt_municipio = i2.idt_municipio
-              WHERE i2.flg_ativo = true
-            ) amostra
-            WHERE amostra.rn <= 12
-          )
-        )
+      primary-key: <source_pk>
+      partition-column: <source_parent_pk>
+      geometry-column: <source_geom>
+      where-clause: "1=1"
       comparison-columns:
-        - nom_municipio
-        - cod_estado
+        - <source_name>
+        - <source_parent_pk>
       persist-columns:
-        - idt_municipio
-        - nom_municipio
-        - cod_estado
+        - <source_pk>
+        - <source_name>
+        - <source_parent_pk>
       column-mapping:
-        idt_municipio: id
-        nom_municipio: name
-        cod_estado: parent_id
-        geo_localizacao: geometry
+        <source_pk>: id
+        <source_name>: name
+        <source_parent_pk>: parent_id
+        <source_geom>: geometry
       layer-name: territory-level-3
-      srid: ${LAYER_SRS_TERRITORY_LEVEL_3:4674}
+      srid: ${LAYER_SRS_TERRITORY_LEVEL_3:4326}
       change-detection-strategy: DEFAULT
   area-of-interest:
-    # Subquery: property + CAR theme areas for KPI theme_1..theme_4 (dsp-db only).
-    # CAR themes (rel_imovel_cobertura_solo.idt_tema):
-    #   32=Legal reserve total, 30=APP total, 2=Native vegetation, 1=Consolidated area
-    source-table: >-
-      (SELECT i.cod_imovel,
-              i.dat_criacao,
-              i.dat_atualizacao,
-              i.idt_municipio,
-              i.num_area_imovel,
-              i.idt_imovel,
-              i.geo_area_imovel,
-              COALESCE(t.src_theme_1, 0) AS src_theme_1,
-              COALESCE(t.src_theme_2, 0) AS src_theme_2,
-              COALESCE(t.src_theme_3, 0) AS src_theme_3,
-              COALESCE(t.src_theme_4, 0) AS src_theme_4
-       FROM usr_geocar_aplicacao.imovel i
-       LEFT JOIN (
-         SELECT r.idt_imovel,
-                SUM(r.num_area) FILTER (WHERE r.idt_tema = 32) AS src_theme_1,
-                SUM(r.num_area) FILTER (WHERE r.idt_tema = 30) AS src_theme_2,
-                SUM(r.num_area) FILTER (WHERE r.idt_tema = 2)  AS src_theme_3,
-                SUM(r.num_area) FILTER (WHERE r.idt_tema = 1)  AS src_theme_4
-         FROM usr_geocar_aplicacao.rel_imovel_cobertura_solo r
-         WHERE r.idt_tema IN (1, 2, 30, 32)
-         GROUP BY r.idt_imovel
-       ) t ON t.idt_imovel = i.idt_imovel
-      ) AS src_aoi
+    # Entities of interest linked to territory_level_3 (FK).
+    # Optional: subquery that computes measures → theme_1..theme_4 (dsp-db only).
+    source-table: <source_schema>.<source_table>
     target-table: dsp.area_of_interest
-    primary-key: cod_imovel
-    geometry-column: geo_area_imovel
-    # Sample: up to 12 active properties per UF; municipality must have geometry (FK-safe).
-    # Warning: with DEFAULT, target rows outside this filter may be deleted as orphans.
-    where-clause: >-
-      idt_imovel IN (
-        SELECT amostra.idt_imovel
-        FROM (
-          SELECT i.idt_imovel,
-                 ROW_NUMBER() OVER (PARTITION BY m.cod_estado ORDER BY i.idt_imovel) AS rn
-          FROM usr_geocar_aplicacao.imovel i
-          INNER JOIN usr_geocar_aplicacao.municipio m ON m.idt_municipio = i.idt_municipio
-          WHERE i.flg_ativo = true
-            AND m.geo_localizacao IS NOT NULL
-        ) amostra
-        WHERE amostra.rn <= 12
-      )
-    # Compare only columns that exist on exhibition-db (geometry target).
-    # Theme measures are business-only — do not list them here.
+    primary-key: <source_pk>
+    geometry-column: <source_geom>
+    where-clause: "1=1"
+    # Columns compared for change detection (exhibition-db). Do not list themes here.
     comparison-columns:
-      - dat_atualizacao
-      - idt_municipio
-      - num_area_imovel
+      - <source_updated_at>
+      - <source_territory_level_3_fk>
+      - <source_area>
     persist-columns:
-      - cod_imovel
-      - dat_criacao
-      - dat_atualizacao
-      - idt_municipio
-      - num_area_imovel
-    # Written only to dsp-db (not exhibition-db).
+      - <source_pk>
+      - <source_created_at>
+      - <source_updated_at>
+      - <source_territory_level_3_fk>
+      - <source_area>
+    # Written only to dsp-db (not exhibition-db). Remove if you have no theme KPIs.
     business-only-persist-columns:
-      - src_theme_1
-      - src_theme_2
-      - src_theme_3
-      - src_theme_4
+      - <source_theme_1>
+      - <source_theme_2>
+      - <source_theme_3>
+      - <source_theme_4>
     column-mapping:
-      cod_imovel: id
-      dat_criacao: registration_date
-      dat_atualizacao: alteration_date
-      idt_municipio: territory_level_3_id
-      num_area_imovel: area
-      geo_area_imovel: geometry
-      src_theme_1: theme_1
-      src_theme_2: theme_2
-      src_theme_3: theme_3
-      src_theme_4: theme_4
+      <source_pk>: id
+      <source_created_at>: registration_date
+      <source_updated_at>: alteration_date
+      <source_territory_level_3_fk>: territory_level_3_id
+      <source_area>: area
+      <source_geom>: geometry
+      <source_theme_1>: theme_1
+      <source_theme_2>: theme_2
+      <source_theme_3>: theme_3
+      <source_theme_4>: theme_4
     layer-name: area-of-interest
-    srid: ${LAYER_SRS_AREA_OF_INTEREST:4674}
+    srid: ${LAYER_SRS_AREA_OF_INTEREST:4326}
     change-detection-strategy: DEFAULT
 
 parallelization:

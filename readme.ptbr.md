@@ -53,7 +53,7 @@ Edite (os scripts criam a partir dos `.example` e **interrompem** se ainda forem
 ./start.sh    # sobe a aplicação (não remigra)
 ```
 
-UI sem dados do CAR: `./setup.sh --skip-migration` e depois `./start.sh`.
+UI sem dados migrados da origem: `./setup.sh --skip-migration` e depois `./start.sh`.
 
 Ajuste só no frontend: `docker compose up -d --build dsp-frontend` (não use `down -v`).
 
@@ -95,7 +95,7 @@ docker compose down -v           # apaga volumes — depois rode ./setup.sh de n
 | [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: camadas WMS / GeoServer |
 | [`config/GeoserverExhibition/docker/`](config/GeoserverExhibition/docker/) | Imagem GeoServer Exhibition + script de populate |
 
-Veja também [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md) e [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
+Veja também [docs/migration-config.md](docs/migration-config.md), [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md) e [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
 
 ## Ainda fora do core
 

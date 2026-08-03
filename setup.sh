@@ -88,15 +88,15 @@ if [ ! -f "$MIGRATION_CONFIG" ]; then
   cp "$MIGRATION_CONFIG_EXAMPLE" "$MIGRATION_CONFIG"
   info "Configuration file created from template:"
   echo "       $MIGRATION_CONFIG"
-  error "Edit the generated file (JDBC connections and ETL mapping) and run './setup.sh' again."
+  error "Edit the generated file: replace <placeholders> with your source tables/columns (ETL mapping)."
   exit 1
 fi
 
 MIGRATION_CONFIG_READY=true
 if cmp -s "$MIGRATION_CONFIG" "$MIGRATION_CONFIG_EXAMPLE"; then
-  warn "Migration config is still identical to the template:"
+  warn "Migration config is still identical to the generic template:"
   echo "       $MIGRATION_CONFIG"
-  warn "Edit this file (JDBC connections and ETL mapping) before migrating data."
+  warn "Replace <placeholders> with your adopter source mapping before migrating."
   MIGRATION_CONFIG_READY=false
 else
   ok "Migration config found: $MIGRATION_CONFIG"
