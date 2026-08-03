@@ -49,11 +49,14 @@ Edit (scripts create from `.example` and **stop** while files still match the te
 - `config/Job-Data-Migration/application/application.yaml` — JDBC + ETL mapping (to migrate)
 
 ```bash
-./setup.sh    # databases + migration + GeoServer publish (data stays on volumes)
+./setup.sh    # databases + migration or demo seed + GeoServer publish
 ./start.sh    # start the application (does not remigrate)
 ```
 
+With no flags, `./setup.sh` asks whether you want a **real** adopter setup (JDBC + ETL) or **demonstration** data (built-in Brazil seed). Shortcuts: `./setup.sh --quickstart` (demo) or `./setup.sh --skip-migration` (empty DBs, no seed).
+
 UI without migrated source data: `./setup.sh --skip-migration` then `./start.sh`.
+Demo with map data: `./setup.sh --quickstart` then `./start.sh` — see [docs/quickstart.md](docs/quickstart.md).
 
 Frontend-only tweak: `docker compose up -d --build dsp-frontend` (do not use `down -v`).
 
@@ -95,7 +98,7 @@ docker compose down -v           # wipe volumes — then run ./setup.sh again
 | [`config/map/mapLayersConfig.json.example`](config/map/mapLayersConfig.json.example) | Template: WMS layers / GeoServer |
 | [`config/GeoserverExhibition/docker/`](config/GeoserverExhibition/docker/) | GeoServer Exhibition image + populate script |
 
-See also [docs/migration-config.md](docs/migration-config.md), [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md), and [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
+See also [docs/quickstart.md](docs/quickstart.md), [docs/migration-config.md](docs/migration-config.md), [docs/installation-config.md](docs/installation-config.md), [docs/map-layers-config.md](docs/map-layers-config.md), and [docs/geoserver-exhibition.md](docs/geoserver-exhibition.md).
 
 ## Not in the core yet
 

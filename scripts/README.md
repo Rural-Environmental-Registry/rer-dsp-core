@@ -9,10 +9,13 @@
 | [`common.sh`](common.sh) | Helpers compartilhados (source pelos dois scripts) |
 
 ```bash
-./setup.sh          # prepara dados (volumes Docker)
+./setup.sh          # prepara dados (volumes Docker); pergunta real vs demo
 ./start.sh          # sobe a aplicação
-./setup.sh --skip-migration   # só DBs + layers GeoServer, sem ETL
+./setup.sh --quickstart       # seed Brasil de demonstração (sem JDBC)
+./setup.sh --skip-migration   # só DBs + layers GeoServer, sem ETL e sem seed
 ```
+
+Demo: [docs/quickstart.md](../docs/quickstart.md). Seed SQL: [`config/db/seed/quickstart/`](../config/db/seed/quickstart/).
 
 ## GeoServer
 

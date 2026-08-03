@@ -399,6 +399,26 @@ wait_for_db() {
   return 1
 }
 
+# pg_isready answers while /docker-entrypoint-initdb.d scripts are still running,
+# so wait for a schema created by the init SQL before touching the tables.
+wait_for_db_schema() {
+  local service="$1"
+  local user="$2"
+  local db="$3"
+  local schema="$4"
+  local i
+  for i in $(seq 1 90); do
+    if docker compose --env-file .env exec -T "$service" \
+        psql -U "$user" -d "$db" -tAc \
+        "SELECT 1 FROM information_schema.schemata WHERE schema_name = '${schema}'" \
+        2>/dev/null | grep -q '^1$'; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 validate_positive_integer() {
   local label="$1"
   local value="$2"
@@ -497,13 +517,25 @@ ensure_dotenv() {
 }
 
 start_databases_and_wait() {
-  info "Starting databases (dsp-db, dsp-geoserver-exhibition-db, dsp-job-migration-db)..."
-  docker compose --env-file .env up -d dsp-db dsp-geoserver-exhibition-db dsp-job-migration-db
+  local include_migration_db="${1:-true}"
+
+  if [ "$include_migration_db" = "true" ]; then
+    info "Starting databases (dsp-db, dsp-geoserver-exhibition-db, dsp-job-migration-db)..."
+    docker compose --env-file .env up -d dsp-db dsp-geoserver-exhibition-db dsp-job-migration-db
+  else
+    info "Starting databases (dsp-db, dsp-geoserver-exhibition-db)..."
+    docker compose --env-file .env up -d dsp-db dsp-geoserver-exhibition-db
+  fi
   ok "Database containers started"
 
   info "Waiting for databases to become healthy..."
   if ! wait_for_db dsp-db "${DSP_DB_USER:-dsp}" "${DSP_DB_NAME:-dsp-db}"; then
     error "dsp-db did not become ready in time."
+    exit 1
+  fi
+  if ! wait_for_db_schema dsp-db "${DSP_DB_USER:-dsp}" "${DSP_DB_NAME:-dsp-db}" dsp; then
+    error "dsp-db init SQL did not create schema 'dsp' in time."
+    docker compose --env-file .env logs --tail 40 dsp-db || true
     exit 1
   fi
   ok "dsp-db ready"
@@ -512,25 +544,215 @@ start_databases_and_wait() {
     error "dsp-geoserver-exhibition-db did not become ready in time."
     exit 1
   fi
-  ok "dsp-geoserver-exhibition-db ready"
-
-  if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
-    error "dsp-job-migration-db did not become ready in time."
+  if ! wait_for_db_schema dsp-geoserver-exhibition-db "${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}" "${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}" dsp; then
+    error "dsp-geoserver-exhibition-db init SQL did not create schema 'dsp' in time."
+    docker compose --env-file .env logs --tail 40 dsp-geoserver-exhibition-db || true
     exit 1
   fi
-  ok "dsp-job-migration-db ready"
+  ok "dsp-geoserver-exhibition-db ready"
+
+  if [ "$include_migration_db" = "true" ]; then
+    if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
+      error "dsp-job-migration-db did not become ready in time."
+      exit 1
+    fi
+    ok "dsp-job-migration-db ready"
+  fi
   ok "Databases are ready"
+}
+
+# Interactive choice when no --quickstart / forced mode is set.
+# Sets the global SETUP_MODE to "demo" or "real".
+# Not a command substitution on purpose: error output must reach the terminal.
+# Status of this project's compose services + URLs; optional project cleanup; then exit.
+show_stack_status_menu() {
+  local services=(
+    dsp-db
+    dsp-geoserver-exhibition-db
+    dsp-job-migration-db
+    dsp-geoserver-exhibition
+    dsp-backend
+    dsp-frontend
+  )
+  local running=""
+  local svc
+  local any_up=false
+
+  echo ""
+  info "Checking this project's Docker stack..."
+  running="$(docker compose --env-file .env ps --status running --format '{{.Service}}' 2>/dev/null || true)"
+  echo ""
+  for svc in "${services[@]}"; do
+    if printf '%s\n' "$running" | grep -qx "$svc"; then
+      echo "  [ON]  ${svc}"
+      any_up=true
+    else
+      echo "  [OFF] ${svc}"
+    fi
+  done
+  echo ""
+  if [ "$any_up" = true ]; then
+    ok "Stack is up (at least one service running)"
+  else
+    warn "Stack is off — no project containers are running"
+  fi
+
+  print_stack_urls
+  print_stack_usage_hints
+
+  echo ""
+  echo "What do you want to do?"
+  echo "  1) Remove this project's containers, volumes and images"
+  echo "  2) Exit"
+  local action=""
+  read -r -p "Choice [1/2]: " action || true
+  case "$action" in
+    1)
+      echo ""
+      warn "This deletes ONLY this project's Docker resources (compose down -v --rmi all)."
+      warn "Database data in project volumes will be lost."
+      local confirm=""
+      read -r -p "Type YES to confirm cleanup: " confirm || true
+      if [ "$confirm" != "YES" ]; then
+        info "Cleanup cancelled."
+        exit 0
+      fi
+      info "Removing project containers, volumes and images..."
+      docker compose --env-file .env down -v --rmi all
+      ok "Project Docker resources removed."
+      exit 0
+      ;;
+    2|"")
+      info "Exiting."
+      exit 0
+      ;;
+    *)
+      error "Invalid choice: '${action}' — use 1 (cleanup) or 2 (exit)."
+      exit 1
+      ;;
+  esac
+}
+
+prompt_setup_mode() {
+  echo ""
+  echo "How do you want to prepare data?"
+  echo "  1) Real adopter setup (JDBC source + ETL migration)"
+  echo "  2) Demonstration only (built-in Brazil seed, no source DB)"
+  echo "  3) Show stack status / URLs (cleanup or exit)"
+  local choice=""
+  read -r -p "Choice [1/2/3]: " choice || true
+  case "$choice" in
+    2)
+      SETUP_MODE="demo"
+      ;;
+    3)
+      show_stack_status_menu
+      ;;
+    1|"")
+      SETUP_MODE="real"
+      ;;
+    *)
+      error "Invalid choice: '${choice}' — use 1 (real), 2 (demonstration) or 3 (status)."
+      error "Run './${DSP_ORCHESTRATION_SCRIPT}' again."
+      exit 1
+      ;;
+  esac
+}
+
+# Ensure UI/map configs for demo without blocking on "edit the template".
+ensure_quickstart_adopter_configs() {
+  local install_example="$ROOT_DIR/config/installation/installation-config.quickstart.json.example"
+  local install_generic="$ROOT_DIR/config/installation/installation-config.json.example"
+  local install_active="$ROOT_DIR/config/installation/installation-config.json"
+  local map_example="$ROOT_DIR/config/map/mapLayersConfig.quickstart.json.example"
+  local map_generic="$ROOT_DIR/config/map/mapLayersConfig.json.example"
+  local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
+
+  if [ ! -f "$install_example" ]; then
+    error "Quickstart installation template not found at: $install_example"
+    exit 1
+  fi
+
+  if [ ! -f "$install_active" ] || { [ -f "$install_generic" ] && cmp -s "$install_active" "$install_generic"; }; then
+    cp "$install_example" "$install_active"
+    info "Installation config set from quickstart template:"
+    echo "       $install_active"
+  else
+    ok "Installation config found: $install_active"
+  fi
+
+  if [ ! -f "$map_example" ]; then
+    error "Quickstart map layers template not found at: $map_example"
+    exit 1
+  fi
+
+  if [ ! -f "$map_active" ] || { [ -f "$map_generic" ] && cmp -s "$map_active" "$map_generic"; }; then
+    cp "$map_example" "$map_active"
+    info "Map layers config set from quickstart template: $map_active"
+  else
+    ok "Map layers config found: $map_active"
+  fi
+
+  if ! validate_json_file "$install_active"; then
+    error "Installation config contains invalid JSON: $install_active"
+    exit 1
+  fi
+  if ! validate_json_file "$map_active"; then
+    error "Map layers config contains invalid JSON: $map_active"
+    exit 1
+  fi
+  validate_map_layers_wms_ids "$map_active"
+}
+
+apply_quickstart_seed() {
+  local seed_dir="$ROOT_DIR/config/db/seed/quickstart"
+  local dsp_user="${DSP_DB_USER:-dsp}"
+  local dsp_db="${DSP_DB_NAME:-dsp-db}"
+  local geo_user="${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
+  local geo_db="${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}"
+
+  for f in \
+    "$seed_dir/01_territory_dsp.sql" \
+    "$seed_dir/02_aoi_dsp.sql" \
+    "$seed_dir/01_territory_exhibition.sql" \
+    "$seed_dir/02_aoi_exhibition.sql"
+  do
+    if [ ! -f "$f" ]; then
+      error "Quickstart seed file missing: $f"
+      exit 1
+    fi
+  done
+
+  info "Applying quickstart seed to dsp-db (demo data)..."
+  docker compose --env-file .env exec -T dsp-db \
+    psql -q -v ON_ERROR_STOP=1 -U "$dsp_user" -d "$dsp_db" \
+    <"$seed_dir/01_territory_dsp.sql"
+  docker compose --env-file .env exec -T dsp-db \
+    psql -q -v ON_ERROR_STOP=1 -U "$dsp_user" -d "$dsp_db" \
+    <"$seed_dir/02_aoi_dsp.sql"
+  ok "dsp-db seeded"
+
+  info "Applying quickstart seed to dsp-geoserver-exhibition-db..."
+  docker compose --env-file .env exec -T dsp-geoserver-exhibition-db \
+    psql -q -v ON_ERROR_STOP=1 -U "$geo_user" -d "$geo_db" \
+    <"$seed_dir/01_territory_exhibition.sql"
+  docker compose --env-file .env exec -T dsp-geoserver-exhibition-db \
+    psql -q -v ON_ERROR_STOP=1 -U "$geo_user" -d "$geo_db" \
+    <"$seed_dir/02_aoi_exhibition.sql"
+  ok "exhibition-db seeded"
+
+  warn "Demonstration data only — heavily simplified Brazil geometries, not production."
 }
 
 start_geoserver_exhibition() {
   local mode="${1:-up}"
   local migration_config="${2:-}"
 
-  if [ -n "$migration_config" ] && [ -f "$migration_config" ]; then
-    info "Reading layer SRS from migration config (application.yaml)..."
-    export_layer_srids_from_migration_config "$migration_config"
-  else
-    warn "Migration config unavailable — GeoServer may need LAYER_SRS_* from a prior setup."
+  # LAYER_SRS_* come from .env (defaults 4674); migration YAML path is unused for SRS today.
+  info "Resolving layer SRS from .env (LAYER_SRS_*)..."
+  export_layer_srids_from_migration_config "$migration_config"
+  if [ -z "$migration_config" ] || [ ! -f "$migration_config" ]; then
+    info "No migration YAML — using LAYER_SRS_* defaults (quickstart / skip-migration)."
   fi
 
   info "Building and starting GeoServer Exhibition..."
@@ -569,4 +791,21 @@ print_stack_urls() {
   echo "DSP DB:                localhost:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
   echo "GeoServer Exhibition DB: localhost:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
   echo "Job migration DB:      localhost:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
+}
+
+print_stack_usage_hints() {
+  echo ""
+  echo "Verify tables:"
+  echo "  docker compose exec dsp-db psql -U ${DSP_DB_USER:-dsp} -d ${DSP_DB_NAME:-dsp-db} -c '\\dt dsp.*'"
+  echo "  docker compose exec dsp-geoserver-exhibition-db psql -U ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo} -d ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db} -c '\\dt dsp.*'"
+  echo ""
+  echo "Migrate / (re)populate data:"
+  echo "  ./setup.sh"
+  echo "  ./setup.sh --skip-migration"
+  echo ""
+  echo "Rebuild frontend only: docker compose up -d --build dsp-frontend"
+  echo "Logs:       docker compose logs -f"
+  echo "Stop:       docker compose down"
+  echo "Reset DBs:  docker compose down -v && ./setup.sh"
+  echo ""
 }

@@ -86,17 +86,4 @@ ok "Backend and frontend are running"
 
 ok "Stack is up"
 print_stack_urls
-echo ""
-echo "Verify tables:"
-echo "  docker compose exec dsp-db psql -U ${DSP_DB_USER:-dsp} -d ${DSP_DB_NAME:-dsp-db} -c '\\dt dsp.*'"
-echo "  docker compose exec dsp-geoserver-exhibition-db psql -U ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo} -d ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db} -c '\\dt dsp.*'"
-echo ""
-echo "Migrate / (re)populate data:"
-echo "  ./setup.sh"
-echo "  ./setup.sh --skip-migration"
-echo ""
-echo "Rebuild frontend only: docker compose up -d --build dsp-frontend"
-echo "Logs:       docker compose logs -f"
-echo "Stop:       docker compose down"
-echo "Reset DBs:  docker compose down -v && ./setup.sh"
-echo ""
+print_stack_usage_hints
