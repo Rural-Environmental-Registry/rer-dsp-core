@@ -42,11 +42,17 @@ cp .env.example .env
 chmod +x ./setup.sh ./start.sh
 ```
 
-Edit (scripts create from `.example` and **stop** while files still match the template):
+Configure the adopter without editing internal files:
 
-- `config/installation/installation-config.json` — UI labels, screens, KPIs
-- `config/map/mapLayersConfig.json` — GeoServer WMS layers
-- `config/Job-Data-Migration/application/application.yaml` — JDBC + ETL mapping (to migrate)
+```bash
+./config.sh       # guided wizard, recommended
+./config.sh --apply  # reapply an existing adopter-config.yaml
+```
+
+The wizard writes `config/adopter/adopter-config.yaml` and generates the
+operational JSON/YAML files. The override file contains only editable fields;
+contract keys such as WMS IDs, target tables, and KPI codes remain protected in
+the core templates.
 
 ```bash
 ./setup.sh    # databases + migration or demo seed + GeoServer publish

@@ -19,17 +19,17 @@ DSP_MAP_LAYERS_FILE=file:/config/mapLayersConfig.json
 
 The backend does **not** require this JSON to be packaged in the jar when running via Docker Compose.
 
-## First run (`./setup.sh` / `./start.sh`)
+## First run (`./config.sh` / `./setup.sh` / `./start.sh`)
 
-1. If `mapLayersConfig.json` is missing, the script copies it from `.example` and exits.
-2. If the active file is still identical to `.example`, the script **blocks** until you edit it (e.g. `baseUrl`, display names, or colors).
-3. Both scripts **validate** that these four WMS layer ids are present (do not rename them):
+1. Run `./config.sh` and provide layer names and colors. WMS URLs are fixed by the core template.
+2. The wizard generates `mapLayersConfig.json`; in advanced mode, use `./config.sh --apply`.
+3. Both scripts **validate** that these four WMS IDs are present (do not rename them):
    - `dsp:territory-level-1`
    - `dsp:territory-level-2`
    - `dsp:territory-level-3`
    - `dsp:area-of-interest`
-4. They also validate `style.color` / `style.fillColor` on those four layers and **print each layer with its colors** before confirmation.
-5. After edits, run `./setup.sh` so GeoServer Exhibition publishes FeatureTypes and syncs SLD colors. Day-to-day use `./start.sh` (does not re-publish).
+4. They also validate `style.color` / `style.fillColor` and display each layer before confirmation.
+5. Run `./setup.sh` to publish the layers; use `./start.sh` day to day.
 
 ## Shape
 
@@ -39,7 +39,7 @@ The backend does **not** require this JSON to be packaged in the jar when runnin
 | `groups[].name` | Display name of the group |
 | `groups[].key` | Stable group identifier |
 | `groups[].layers` | WMS layers in the group |
-| `layers[].baseUrl` | GeoServer WMS base URL (default local: `http://localhost:22668/geoserver/dsp/wms`) |
+| `layers[].baseUrl` | Fixed GeoServer WMS base URL from the core template |
 | `layers[].layers` | WMS `layers` parameter (workspace:layer) — **fixed ids**, validated by `start.sh` |
 | `layers[].name` | Display name (free to edit) |
 | `layers[].activeDefault` | Whether the layer is on by default |
@@ -61,12 +61,10 @@ Territory defaults are a black-to-gray scale (L1 → L3). Change them in the act
 
 ## Adopter changes
 
-1. Run `./start.sh` once to generate the active file from `.example` (or copy manually).
-2. Edit `baseUrl` if needed; keep the four `layers` ids unchanged.
-3. Customize `style.color` / `style.fillColor` as needed (hex or `transparent` for fill).
-4. Align display `name` values with installation hierarchy labels when possible.
-5. Re-run `./start.sh` so GeoServer Exhibition regenerates SLDs from the active file.
-6. Restart backend after edits (config is cached at startup).
+1. Run `./config.sh` to configure display names and colors.
+2. WMS URLs remain fixed; keep the four `layers` IDs unchanged.
+3. Run `./setup.sh` so GeoServer Exhibition regenerates SLDs from the generated file.
+4. Restart the backend after edits (config is cached at startup).
 
 ## Related APIs
 

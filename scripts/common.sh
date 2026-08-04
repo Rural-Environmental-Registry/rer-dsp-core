@@ -7,10 +7,39 @@ NC='\033[0m'
 DSP_ORCHESTRATION_SCRIPT="${DSP_ORCHESTRATION_SCRIPT:-script}"
 TOTAL_STEPS="${TOTAL_STEPS:-0}"
 
+declare -gA STACK_SERVICE_STATUSES=()
+STACK_REQUIRED_SERVICES=(
+  dsp-db
+  dsp-geoserver-exhibition-db
+  dsp-geoserver-exhibition
+  dsp-backend
+  dsp-frontend
+)
+
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 ok() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+prompt_yes_no() {
+  local prompt="$1"
+  local answer=""
+
+  while true; do
+    read -r -p "${prompt} [y/n] " answer || return 1
+    case "$answer" in
+      y|Y)
+        return 0
+        ;;
+      n|N)
+        return 1
+        ;;
+      *)
+        warn "Invalid response. Please enter y or n."
+        ;;
+    esac
+  done
+}
 
 step_header() {
   local step="$1"
@@ -58,11 +87,9 @@ ensure_adopter_json_config() {
   fi
 
   if [ ! -f "$active" ]; then
-    cp "$example" "$active"
     error "${label} file not found:"
     echo "        $active"
-    info "Created from template: $example"
-    error "Edit the file (${edit_hint}) and run './${DSP_ORCHESTRATION_SCRIPT}' again."
+    error "Run ./config.sh to generate the active file (${edit_hint}) and try './${DSP_ORCHESTRATION_SCRIPT}' again."
     exit 1
   fi
 
@@ -516,6 +543,35 @@ ensure_dotenv() {
   set +a
 }
 
+ensure_adopter_config() {
+  local example="$ROOT_DIR/config/adopter/adopter-config.yaml.example"
+  local active="$ROOT_DIR/config/adopter/adopter-config.yaml"
+  local apply_script="$ROOT_DIR/scripts/apply_adopter_config.py"
+
+  if [ ! -f "$example" ]; then
+    error "Adopter configuration template not found: $example"
+    exit 1
+  fi
+  if [ ! -f "$active" ]; then
+    error "Adopter configuration not found: $active"
+    error "Run ./config.sh to fill in the allowed fields and try again."
+    exit 1
+  fi
+  if cmp -s "$active" "$example"; then
+    error "The adopter configuration is still identical to the template."
+    error "Run ./config.sh to fill in the allowed fields."
+    exit 1
+  fi
+  if ! python3 "$apply_script" --root "$ROOT_DIR" --config "$active"; then
+    error "Could not generate the DSP configuration files."
+    error "Fix $active or run ./config.sh again."
+    exit 1
+  fi
+  # Applying the configuration may update .env; reload it before continuing.
+  ensure_dotenv
+  ok "Adopter configuration applied safely"
+}
+
 start_databases_and_wait() {
   local include_migration_db="${1:-true}"
 
@@ -561,43 +617,151 @@ start_databases_and_wait() {
   ok "Databases are ready"
 }
 
+# Runtime stack status helpers (container state / Docker healthcheck — no HTTP probes).
+
+is_stack_optional_service() {
+  [ "$1" = "dsp-job-migration-db" ]
+}
+
+get_stack_runtime_services() {
+  local svc
+  while IFS= read -r svc; do
+    [ -z "$svc" ] && continue
+    [ "$svc" = "dsp-job-migration" ] && continue
+    printf '%s\n' "$svc"
+  done < <(docker compose --env-file .env config --services 2>/dev/null || true)
+}
+
+compose_status_label() {
+  local state="$1"
+  local health="$2"
+
+  if [ "$state" != "running" ]; then
+    echo "STOPPED"
+    return
+  fi
+  case "$health" in
+    healthy) echo "HEALTHY" ;;
+    unhealthy) echo "UNHEALTHY" ;;
+    starting) echo "STARTING" ;;
+    *) echo "RUNNING" ;;
+  esac
+}
+
+load_stack_service_statuses() {
+  local refresh="${1:-false}"
+  local line svc state health label runtime_svc
+
+  if [ "$refresh" != "true" ] && [ "${#STACK_SERVICE_STATUSES[@]}" -gt 0 ]; then
+    return
+  fi
+
+  STACK_SERVICE_STATUSES=()
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    svc="${line%%|*}"
+    line="${line#*|}"
+    state="${line%%|*}"
+    health="${line#*|}"
+    label="$(compose_status_label "$state" "$health")"
+    STACK_SERVICE_STATUSES["$svc"]="$label"
+  done < <(docker compose --env-file .env ps -a --format '{{.Service}}|{{.State}}|{{.Health}}' 2>/dev/null || true)
+
+  while IFS= read -r runtime_svc; do
+    [ -z "$runtime_svc" ] && continue
+    if [ -z "${STACK_SERVICE_STATUSES[$runtime_svc]+x}" ]; then
+      STACK_SERVICE_STATUSES["$runtime_svc"]="STOPPED"
+    fi
+  done < <(get_stack_runtime_services)
+}
+
+stack_service_status() {
+  echo "${STACK_SERVICE_STATUSES[$1]:-STOPPED}"
+}
+
+is_stack_service_up() {
+  [ "$(stack_service_status "$1")" != "STOPPED" ]
+}
+
+print_stack_service_status() {
+  local svc status note
+
+  load_stack_service_statuses true
+  echo ""
+  info "Checking this project's Docker containers..."
+  echo ""
+  while IFS= read -r svc; do
+    [ -z "$svc" ] && continue
+    status="$(stack_service_status "$svc")"
+    note=""
+    if is_stack_optional_service "$svc"; then
+      note="  (optional — setup/migration)"
+    fi
+    printf '  [%s] %s%s\n' "$status" "$svc" "$note"
+  done < <(get_stack_runtime_services)
+  echo ""
+}
+
+print_stack_summary() {
+  local svc status
+  local required_total=0
+  local required_up=0
+  local has_caveat=false
+  local any_up=false
+
+  load_stack_service_statuses
+
+  for svc in "${STACK_REQUIRED_SERVICES[@]}"; do
+    required_total=$((required_total + 1))
+    status="$(stack_service_status "$svc")"
+    if is_stack_service_up "$svc"; then
+      required_up=$((required_up + 1))
+      any_up=true
+      case "$status" in
+        UNHEALTHY|STARTING) has_caveat=true ;;
+      esac
+    fi
+  done
+
+  while IFS= read -r svc; do
+    [ -z "$svc" ] && continue
+    if is_stack_service_up "$svc"; then
+      any_up=true
+    fi
+  done < <(get_stack_runtime_services)
+
+  if [ "$any_up" = false ]; then
+    warn "Stack is off — no project containers are running."
+  elif [ "$required_up" -lt "$required_total" ]; then
+    warn "Partial stack — ${required_up} of ${required_total} required services running."
+  elif [ "$has_caveat" = true ]; then
+    warn "Stack is running with health caveats (UNHEALTHY or STARTING containers)."
+  else
+    ok "Stack ready — all required services are running."
+  fi
+  info "Container state only — HTTP endpoints are not probed."
+}
+
+print_stack_url_line() {
+  local label="$1"
+  local status="$2"
+  local url="$3"
+
+  if [ -n "$status" ]; then
+    printf '%-22s [%s] %s\n' "${label}:" "$status" "$url"
+  else
+    printf '%-22s %s\n' "${label}:" "$url"
+  fi
+}
+
 # Interactive choice when no --quickstart / forced mode is set.
 # Sets the global SETUP_MODE to "demo" or "real".
 # Not a command substitution on purpose: error output must reach the terminal.
 # Status of this project's compose services + URLs; optional project cleanup; then exit.
 show_stack_status_menu() {
-  local services=(
-    dsp-db
-    dsp-geoserver-exhibition-db
-    dsp-job-migration-db
-    dsp-geoserver-exhibition
-    dsp-backend
-    dsp-frontend
-  )
-  local running=""
-  local svc
-  local any_up=false
-
-  echo ""
-  info "Checking this project's Docker stack..."
-  running="$(docker compose --env-file .env ps --status running --format '{{.Service}}' 2>/dev/null || true)"
-  echo ""
-  for svc in "${services[@]}"; do
-    if printf '%s\n' "$running" | grep -qx "$svc"; then
-      echo "  [ON]  ${svc}"
-      any_up=true
-    else
-      echo "  [OFF] ${svc}"
-    fi
-  done
-  echo ""
-  if [ "$any_up" = true ]; then
-    ok "Stack is up (at least one service running)"
-  else
-    warn "Stack is off — no project containers are running"
-  fi
-
-  print_stack_urls
+  print_stack_service_status
+  print_stack_summary
+  print_stack_urls with-status
   print_stack_usage_hints
 
   echo ""
@@ -704,6 +868,55 @@ ensure_quickstart_adopter_configs() {
   validate_map_layers_wms_ids "$map_active"
 }
 
+is_quickstart_configured() {
+  local install_example="$ROOT_DIR/config/installation/installation-config.quickstart.json.example"
+  local install_active="$ROOT_DIR/config/installation/installation-config.json"
+  local map_example="$ROOT_DIR/config/map/mapLayersConfig.quickstart.json.example"
+  local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
+  local adopter_config="$ROOT_DIR/config/adopter/adopter-config.yaml"
+
+  if [ ! -f "$adopter_config" ] &&
+    [ -f "$install_active" ] &&
+    [ -f "$map_active" ]; then
+    return 0
+  fi
+
+  [ -f "$install_example" ] &&
+    [ -f "$install_active" ] &&
+    [ -f "$map_example" ] &&
+    [ -f "$map_active" ] &&
+    cmp -s "$install_active" "$install_example" &&
+    cmp -s "$map_active" "$map_example"
+}
+
+use_quickstart_layer_srids() {
+  local mismatch=false
+  local value
+
+  for value in \
+    "${LAYER_SRS_TERRITORY_LEVEL_1:-4674}" \
+    "${LAYER_SRS_TERRITORY_LEVEL_2:-4674}" \
+    "${LAYER_SRS_TERRITORY_LEVEL_3:-4674}" \
+    "${LAYER_SRS_AREA_OF_INTEREST:-4674}"
+  do
+    value="${value#EPSG:}"
+    if [ "$value" != "4674" ]; then
+      mismatch=true
+      break
+    fi
+  done
+
+  if [ "$mismatch" = "true" ]; then
+    warn "Quickstart usa SRID 4674; os SRIDs do .env serão usados apenas no fluxo real."
+  fi
+
+  export LAYER_SRS_TERRITORY_LEVEL_1="EPSG:4674"
+  export LAYER_SRS_TERRITORY_LEVEL_2="EPSG:4674"
+  export LAYER_SRS_TERRITORY_LEVEL_3="EPSG:4674"
+  export LAYER_SRS_AREA_OF_INTEREST="EPSG:4674"
+  ok "Quickstart layer SRS: L1=EPSG:4674 L2=EPSG:4674 L3=EPSG:4674 AOI=EPSG:4674"
+}
+
 apply_quickstart_seed() {
   local seed_dir="$ROOT_DIR/config/db/seed/quickstart"
   local dsp_user="${DSP_DB_USER:-dsp}"
@@ -780,17 +993,44 @@ start_geoserver_exhibition() {
 }
 
 print_stack_urls() {
+  local show_status="${1:-}"
   local geoserver_url="${GEOSERVER_PUBLIC_URL:-http://${DSP_HTTP_HOST:-localhost}:${DSP_GEOSERVER_HOST_PORT:-22668}/geoserver}"
+  local http_host="${DSP_HTTP_HOST:-localhost}"
+  local frontend_url="http://${http_host}:${DSP_FRONTEND_HOST_PORT:-22667}${VITE_BASE_URL:-/dsp/}"
+  local backend_url="http://${http_host}:${DSP_BACKEND_HOST_PORT:-22666}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
+  local svc_status=""
+
+  if [ "$show_status" = "with-status" ]; then
+    load_stack_service_statuses
+    echo ""
+    svc_status="$(stack_service_status dsp-frontend)"
+    print_stack_url_line "Frontend" "$svc_status" "$frontend_url"
+    svc_status="$(stack_service_status dsp-backend)"
+    print_stack_url_line "Backend" "$svc_status" "$backend_url"
+    print_stack_url_line "Installation config" "$svc_status" "${backend_url}/config/installation"
+    print_stack_url_line "Map layers" "$svc_status" "${backend_url}/map/getLayers"
+    svc_status="$(stack_service_status dsp-geoserver-exhibition)"
+    print_stack_url_line "GeoServer Exhibition" "$svc_status" "${geoserver_url}/web/"
+    print_stack_url_line "GeoServer WMS" "$svc_status" "${geoserver_url}/dsp/wms"
+    svc_status="$(stack_service_status dsp-db)"
+    print_stack_url_line "DSP DB" "$svc_status" "${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
+    svc_status="$(stack_service_status dsp-geoserver-exhibition-db)"
+    print_stack_url_line "GeoServer Exhibition DB" "$svc_status" "${http_host}:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
+    svc_status="$(stack_service_status dsp-job-migration-db)"
+    print_stack_url_line "Job migration DB" "$svc_status" "${http_host}:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
+    return
+  fi
+
   echo ""
-  echo "Frontend:              http://${DSP_HTTP_HOST:-localhost}:${DSP_FRONTEND_HOST_PORT:-22667}${VITE_BASE_URL:-/dsp/}"
-  echo "Backend:               http://${DSP_HTTP_HOST:-localhost}:${DSP_BACKEND_HOST_PORT:-22666}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
-  echo "Installation config:   http://${DSP_HTTP_HOST:-localhost}:${DSP_BACKEND_HOST_PORT:-22666}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}/config/installation"
-  echo "Map layers:            http://${DSP_HTTP_HOST:-localhost}:${DSP_BACKEND_HOST_PORT:-22666}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}/map/getLayers"
+  echo "Frontend:              ${frontend_url}"
+  echo "Backend:               ${backend_url}"
+  echo "Installation config:   ${backend_url}/config/installation"
+  echo "Map layers:            ${backend_url}/map/getLayers"
   echo "GeoServer Exhibition:  ${geoserver_url}/web/"
   echo "GeoServer WMS:         ${geoserver_url}/dsp/wms"
-  echo "DSP DB:                localhost:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
-  echo "GeoServer Exhibition DB: localhost:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
-  echo "Job migration DB:      localhost:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
+  echo "DSP DB:                ${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
+  echo "GeoServer Exhibition DB: ${http_host}:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
+  echo "Job migration DB:      ${http_host}:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
 }
 
 print_stack_usage_hints() {

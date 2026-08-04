@@ -19,9 +19,14 @@ The backend does **not** package this JSON in the jar.
 
 ## First run (`./start.sh`)
 
-1. If `installation-config.json` is missing, `start.sh` copies it from `.example` and exits.
-2. If the active file is still identical to `.example`, startup is **blocked** until you edit hierarchy labels, screens, KPIs, and formats.
-3. After edits, re-run `./start.sh` (app stack). Data migration stays in `./setup.sh`.
+1. Run `./config.sh` to fill in the guided adopter configuration.
+2. The script generates `installation-config.json` from the protected template.
+3. `start.sh` validates the generated file and starts the application. Migration remains in `./setup.sh`.
+
+In advanced mode, edit only `config/adopter/adopter-config.yaml` (created from
+`config/adopter/adopter-config.yaml.example`) and run
+`./config.sh --apply`. Do not edit the `key`, `code`, or `primaryCode` keys
+directly.
 
 ## Shape
 
@@ -43,6 +48,10 @@ The backend does **not** package this JSON in the jar.
 
 Rename only the `label` fields for your country (e.g. Theme 1 → “Legal reserve”).
 
+During `./config.sh`, the wizard first asks how many theme KPIs exist in the
+source database (from zero to four). Unselected themes are omitted from both
+the generated KPI configuration and the ETL mapping.
+
 ## Related APIs
 
 - `GET /territory/options?level=&parentId=` — `dsp.territory_level_*`
@@ -50,9 +59,8 @@ Rename only the `label` fields for your country (e.g. Theme 1 → “Legal reser
 
 ## Adopter changes
 
-1. Run `./start.sh` once to generate the active file from `.example` (or copy manually).
-2. Edit `installation-config.json` — rename hierarchy and KPI labels.
+1. Run `./config.sh` to generate the active installation configuration.
+2. Configure hierarchy, KPI labels, formats, and area through the wizard or `adopter-config.yaml`.
 3. Keep `AREA_OF_INTEREST` as `primaryCode` unless the product contract changes.
-4. Map theme source columns in the migration YAML (`business-only-persist-columns`) when you have theme measures — see [migration-config.md](migration-config.md).
-5. Adjust `formats` and `areaOfInterest` as needed.
-6. Restart backend after edits (config is cached at startup).
+4. Map theme source columns through the migration configuration — see [migration-config.md](migration-config.md).
+5. Restart the backend after configuration changes (the config is cached at startup).

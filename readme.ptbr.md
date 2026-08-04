@@ -42,11 +42,15 @@ cp .env.example .env
 chmod +x ./setup.sh ./start.sh
 ```
 
-Edite (os scripts criam a partir dos `.example` e **interrompem** se ainda forem idênticos ao template):
+Configure o adotante sem editar arquivos internos:
 
-- `config/installation/installation-config.json` — labels da UI, telas, KPIs
-- `config/map/mapLayersConfig.json` — camadas WMS do GeoServer
-- `config/Job-Data-Migration/application/application.yaml` — JDBC + mapeamento ETL (para migrar)
+```bash
+./config.sh          # wizard guiado, recomendado
+./config.sh --apply  # reaplica um adopter-config.yaml existente
+```
+
+O wizard gera os arquivos JSON/YAML operacionais. `setup.sh` e `start.sh`
+validam esses arquivos, mas não criam arquivos ativos a partir dos `.example`.
 
 ```bash
 ./setup.sh    # bancos + migração ou seed de demo + publish GeoServer

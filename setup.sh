@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT_DIR"
 
 DSP_ORCHESTRATION_SCRIPT="setup.sh"
-TOTAL_STEPS=9
+TOTAL_STEPS=10
 
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/common.sh"
@@ -42,7 +42,7 @@ for arg in "$@"; do
       echo "Flags:"
       echo "  --quickstart       demonstration seed (non-interactive)"
       echo "  --skip-migration   real setup without ETL (empty DBs + GeoServer)"
-      echo "  --status           show stack ON/OFF + URLs; cleanup or exit (same as choice 3)"
+      echo "  --status           show container/health status + URLs; cleanup or exit (same as choice 3)"
       echo ""
       echo "Then run: ./start.sh"
       echo ""
@@ -100,6 +100,11 @@ else
   fi
 fi
 
+if [ "$SETUP_MODE" = "real" ]; then
+  step_header 4 "Adopter configuration"
+  ensure_adopter_config
+fi
+
 WILL_MIGRATE=false
 if [ "$SETUP_MODE" = "real" ] && [ "$SKIP_MIGRATION" != "true" ]; then
   WILL_MIGRATE=true
@@ -114,9 +119,7 @@ if [ "$SETUP_MODE" = "demo" ]; then
 
   step_header 5 "Confirmation"
   warn "Demonstration data only — no JDBC source and no migration job."
-  confirmation=""
-  read -r -p "Do you want to continue with this setup? [y/N] " confirmation || true
-  if [[ ! "$confirmation" =~ ^([yY]|[yY][eE][sS])$ ]]; then
+  if ! prompt_yes_no "Do you want to continue with this setup?"; then
     info "Setup cancelled."
     exit 0
   fi
@@ -128,11 +131,7 @@ if [ "$SETUP_MODE" = "demo" ]; then
   apply_quickstart_seed
 
   step_header 8 "GeoServer Exhibition (publish layers)"
-  # Seed uses SRID 4674 — align LAYER_SRS_* if unset
-  export LAYER_SRS_TERRITORY_LEVEL_1="${LAYER_SRS_TERRITORY_LEVEL_1:-4674}"
-  export LAYER_SRS_TERRITORY_LEVEL_2="${LAYER_SRS_TERRITORY_LEVEL_2:-4674}"
-  export LAYER_SRS_TERRITORY_LEVEL_3="${LAYER_SRS_TERRITORY_LEVEL_3:-4674}"
-  export LAYER_SRS_AREA_OF_INTEREST="${LAYER_SRS_AREA_OF_INTEREST:-4674}"
+  use_quickstart_layer_srids
   start_geoserver_exhibition "populate" ""
 
   ok "Setup finished — demonstration data is ready on Docker volumes."
@@ -141,7 +140,7 @@ if [ "$SETUP_MODE" = "demo" ]; then
   echo "  ./start.sh"
   echo ""
   echo "Day-to-day: prefer ./start.sh (does not re-run seed)."
-  echo "Real adopter data later: edit application.yaml and run ./setup.sh (choose 1)."
+  echo "Real adopter data later: run ./config.sh and then ./setup.sh (choose 1)."
   echo "Reset DBs (lose data): docker compose down -v && ./setup.sh"
   echo ""
   exit 0
@@ -179,11 +178,9 @@ fi
 if [ ! -f "$MIGRATION_CONFIG" ]; then
   error "Migration configuration file not found:"
   echo "        $MIGRATION_CONFIG"
-  cp "$MIGRATION_CONFIG_EXAMPLE" "$MIGRATION_CONFIG"
-  info "Configuration file created from template:"
-  echo "       $MIGRATION_CONFIG"
-  error "Edit the generated file: replace <placeholders> with your source tables/columns (ETL mapping)."
-  error "Or run ./setup.sh again and choose demonstration (2) / --quickstart."
+  error "Run ./config.sh to generate the active configuration from the adopter wizard."
+  error "If adopter-config.yaml already exists, use ./config.sh --apply."
+  error "Or choose demonstration with ./setup.sh --quickstart."
   exit 1
 fi
 
@@ -209,9 +206,7 @@ if [ "$WILL_MIGRATE" = "true" ] && [ "$MIGRATION_CONFIG_READY" = "false" ]; then
   exit 1
 fi
 
-confirmation=""
-read -r -p "Do you want to continue with this setup? [y/N] " confirmation || true
-if [[ ! "$confirmation" =~ ^([yY]|[yY][eE][sS])$ ]]; then
+if ! prompt_yes_no "Do you want to continue with this setup?"; then
   info "Setup cancelled."
   exit 0
 fi

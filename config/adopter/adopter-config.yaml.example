@@ -1,0 +1,174 @@
+# Adopter configuration
+#
+# This is the only file to edit in the advanced workflow.
+# DSP contract keys are kept by the core templates.
+# To fill in this file step by step, run: ./config.sh
+
+environment:
+  # Source database connection used by the migration.
+  source_jdbc_url: jdbc:postgresql://source-db-host:5433/source_db
+  source_db_user: postgres
+  source_db_password: postgres
+  # SRID of the source geometry data.
+  layer_srs:
+    territory_level_1: 4674
+    territory_level_2: 4674
+    territory_level_3: 4674
+    area_of_interest: 4674
+  # Paths to sibling repositories.
+  backend_path: ../rer-dsp-backend
+  frontend_path: ../rer-dsp-frontend
+  job_migration_path: ../rer-dsp-job-data-migration
+
+installation:
+  hierarchy:
+    level1:
+      label: Continent
+      placeholder: Select continent
+    level2:
+      label: Country
+      placeholder: Select country
+    level3:
+      label: Administrative area
+      placeholder: Select administrative area
+  screens:
+    home_title: Browse registered data
+    downloads_title: Download public data
+  kpis:
+    # Number of theme KPIs available in the source database (0 to 4).
+    theme_count: 4
+    area_of_interest:
+      label: Registered properties
+      unit_of_measurement: un.
+      optional_label: ha
+      accent_color: "#CED6E5"
+    theme_1:
+      enabled: true
+      label: Theme 1
+      unit_of_measurement: un.
+      accent_color: "#E5E7EB"
+    theme_2:
+      enabled: true
+      label: Theme 2
+      unit_of_measurement: un.
+      accent_color: "#E5E7EB"
+    theme_3:
+      enabled: true
+      label: Theme 3
+      unit_of_measurement: un.
+      accent_color: "#E5E7EB"
+    theme_4:
+      enabled: true
+      label: Theme 4
+      unit_of_measurement: un.
+      accent_color: "#E5E7EB"
+  area:
+    unit: ha
+    unit_label: ha
+  formats:
+    date: dd/MM/yyyy
+    date_time: dd/MM/yyyy HH:mm
+
+map:
+  group_names:
+    territorial_division: Territorial division
+    areas_of_interest: Declared areas of interest
+  layers:
+    level1:
+      name: Continent
+      active_default: false
+      color: "#9D174D"
+      fill_color: transparent
+    level2:
+      name: Country
+      active_default: true
+      color: "#DB2777"
+      fill_color: transparent
+    level3:
+      name: Administrative area
+      active_default: false
+      color: "#701A3A"
+      fill_color: transparent
+    area_of_interest:
+      name: Area of interest
+      active_default: true
+      color: "#F59E0B"
+      fill_color: "#FEF3C7"
+
+etl:
+  # Enter the tables and columns available in the source database.
+  # Wizard: use a simple table name (schema.table).
+  # Advanced: SQL subqueries are allowed only in this file. Use a YAML folded
+  # block (>-). Column fields below must match the SELECT aliases, for example:
+  #
+  #   source_table: >-
+  #     (SELECT c.shape_id,
+  #             c.nome,
+  #             c.geom,
+  #             d.shape_id AS parent_shape_id
+  #      FROM public.concelhos c
+  #      INNER JOIN public.distritos d ON d.id = c.distrito_id
+  #      WHERE c.geom IS NOT NULL
+  #        AND c.shape_id IS NOT NULL
+  #        AND d.shape_id IS NOT NULL) AS src_l2
+  #   primary_key: shape_id
+  #   parent_key: parent_shape_id
+  #   name_column: nome
+  #   geometry_column: geom
+  #
+  # After editing SQL here, run: ./config.sh --apply
+  level1:
+    source_table: <source_schema>.<source_table>
+    primary_key: <source_pk>
+    name_column: <source_name>
+    geometry_column: <source_geom>
+    where_clause: "1=1"
+  level2:
+    source_table: <source_schema>.<source_table>
+    primary_key: <source_pk>
+    parent_key: <source_parent_pk>
+    name_column: <source_name>
+    geometry_column: <source_geom>
+    where_clause: "1=1"
+  level3:
+    source_table: <source_schema>.<source_table>
+    primary_key: <source_pk>
+    parent_key: <source_parent_pk>
+    name_column: <source_name>
+    geometry_column: <source_geom>
+    where_clause: "1=1"
+  area_of_interest:
+    source_table: <source_schema>.<source_table>
+    primary_key: <source_pk>
+    geometry_column: <source_geom>
+    created_at_column: <source_created_at>
+    updated_at_column: <source_updated_at>
+    territory_level_3_column: <source_territory_level_3_fk>
+    area_column: <source_area>
+    theme_1_column: <source_theme_1>
+    theme_2_column: <source_theme_2>
+    theme_3_column: <source_theme_3>
+    theme_4_column: <source_theme_4>
+    where_clause: "1=1"
+  jobs:
+    level1: true
+    level2: true
+    level3: true
+    area_of_interest: true
+  parallelization:
+    level1:
+      thread_pool_size: 1
+      chunk_size: 1
+      page_size: 1000
+    level2:
+      thread_pool_size: 4
+      chunk_size: 1
+      page_size: 1000
+    level3:
+      thread_pool_size: 4
+      chunk_size: 100
+      page_size: 1000
+    area_of_interest:
+      thread_pool_size: 1
+      chunk_size: 100
+      page_size: 1000

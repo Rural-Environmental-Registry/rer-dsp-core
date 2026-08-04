@@ -13,10 +13,12 @@ O Docker Compose monta apenas o arquivo ativo em `/config/application.yaml` no c
 
 ## Fluxo no primeiro uso
 
-1. Rode `./setup.sh`. Se `application.yaml` não existir, o script copia o `.example` e interrompe.
-2. Edite o arquivo ativo: substitua os placeholders `<...>` pelas tabelas/colunas da sua origem e ajuste `where-clause`, paralelismo e SRIDs se necessário.
-3. Configure a origem no `.env` (`DSP_SOURCE_JDBC_URL`, `DSP_SOURCE_DB_USER`, `DSP_SOURCE_DB_PASSWORD`).
-4. Rode `./setup.sh` de novo. Enquanto o ativo for idêntico ao template, a migração fica bloqueada (use `--skip-migration` se quiser só subir bancos/GeoServer, ou escolha demonstration / `--quickstart` para seed embutido — ver [quickstart.md](quickstart.md)).
+1. Run `./config.sh` and provide the source database, tables, and columns.
+2. The wizard generates `application.yaml` with protected targets and layer names.
+3. In advanced mode, fill in `config/adopter/adopter-config.yaml` and run `./config.sh --apply`.
+4. Run `./setup.sh`. Migration remains blocked while placeholders exist.
+   Use `--skip-migration` to start only the databases/GeoServer or `--quickstart`
+   for the built-in seed — see [quickstart.md](quickstart.md).
 
 ## Datasources
 
@@ -56,6 +58,10 @@ Quatro jobs fixos: `admin-unit.level-1`, `level-2`, `level-3` e `area-of-interes
 **Área de interesse:** `id`, `registration_date`, `alteration_date`, `territory_level_3_id`, `area`, `geometry`; opcionalmente `theme_1`…`theme_4`.
 
 KPIs da UI leem `theme_*` via [installation-config](installation-config.md) (`THEME_1`…`THEME_4`). Os rótulos ficam no JSON de instalação; o YAML só mapeia as colunas numéricas.
+
+The guided configuration asks for the number of available theme KPIs before
+asking for their source columns. Themes that are not selected are omitted from
+`business-only-persist-columns` and `column-mapping`.
 
 ## Paralelismo e jobs
 

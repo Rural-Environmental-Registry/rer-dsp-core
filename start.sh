@@ -58,14 +58,17 @@ step_header 5 "Map layers config (WMS / GeoServer)"
 
 ensure_map_layers_config
 
+if is_quickstart_configured; then
+  info "Quickstart configuration detected."
+  use_quickstart_layer_srids
+fi
+
 step_header 6 "Confirmation"
 
 info "This script starts the application stack only (no data migration)."
 info "To migrate/populate data, run ./setup.sh first (uses Docker volumes)."
 
-confirmation=""
-read -r -p "Do you want to continue? [y/N] " confirmation || true
-if [[ ! "$confirmation" =~ ^([yY]|[yY][eE][sS])$ ]]; then
+if ! prompt_yes_no "Do you want to continue?"; then
   info "Startup cancelled."
   exit 0
 fi
@@ -84,6 +87,6 @@ info "Building and starting application containers..."
 docker compose --env-file .env up -d --build dsp-backend dsp-frontend
 ok "Backend and frontend are running"
 
-ok "Stack is up"
-print_stack_urls
+print_stack_summary
+print_stack_urls with-status
 print_stack_usage_hints

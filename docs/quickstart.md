@@ -19,12 +19,19 @@ Non-interactive:
 ./start.sh
 ```
 
+In demo mode, `./start.sh` does not require
+`config/adopter/adopter-config.yaml`. This file is only used in the flow
+real of the adopter.
+
 ## What it does
 
 1. Starts `dsp-db` and `dsp-geoserver-exhibition-db` (not the migration job DB).
 2. Loads static SQL from [`config/db/seed/quickstart/`](../config/db/seed/quickstart/).
-3. Publishes GeoServer layers (SRID **4674**).
-4. Ensures UI configs: Country / Region / State labels from `installation-config.quickstart.json.example` and map layer names from `mapLayersConfig.quickstart.json.example` (so `./start.sh` is not blocked by an untouched generic template).
+3. Publishes GeoServer layers (SRID **4674**), independent of the SRIDs in
+   `.env` used by a real adopter.
+4. Ensures UI configs: Country / Region / State labels from
+   `installation-config.quickstart.json.example` and map layer names from
+   `mapLayersConfig.quickstart.json.example`.
 
 ## Dataset (demo only)
 
@@ -39,6 +46,9 @@ Geometries are heavily simplified, but topologically consistent: neighbouring st
 
 ## Real adopter setup
 
-Choose option **1** in `./setup.sh` (or run without choosing demo): edit [`application.yaml`](../config/Job-Data-Migration/application/application.yaml) and migrate from your source. See [migration-config.md](migration-config.md).
+Choose option **1** in `./setup.sh` (or run without choosing demo) after
+running `./config.sh` to configure the source and generate
+[`application.yaml`](../config/Job-Data-Migration/application/application.yaml).
+See [migration-config.md](migration-config.md).
 
 `./setup.sh --skip-migration` still means empty DBs (no seed) + GeoServer only.
