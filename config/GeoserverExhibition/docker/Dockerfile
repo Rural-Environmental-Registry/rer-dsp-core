@@ -5,6 +5,7 @@ RUN apt-get update --allow-insecure-repositories --allow-unauthenticated && \
     apt-get install -y --no-install-recommends --allow-unauthenticated \
     curl \
     jq \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # UID 999 = tomcat user when RUN_UNPRIVILEGED=true

@@ -85,6 +85,7 @@ installation:
     date_time: dd/MM/yyyy HH:mm
 
 map:
+  # Fixed groups (dt / ird) plus any extra keys used by etl.layers[].group_key.
   group_names:
     territorial_division: Territorial division
     areas_of_interest: Declared areas of interest
@@ -167,11 +168,30 @@ etl:
     theme_3_column: <source_theme_3>
     theme_4_column: <source_theme_4>
     where_clause: "1=1"
+  # Extra geographic layers (generic). Each item migrates to dsp.<table> on
+  # exhibition-db, is published to GeoServer, and appears in the map panel.
+  # Presentation and ETL share one entry to avoid drift. Leave empty when unused.
+  # Filled by ./config.sh (stage 5) or edited here directly.
+  #
+  #   layers:
+  #     - source_table: <schema>.<table>   # origin schema (e.g. public) — never dsp
+  #       area_of_interest_id_column: <aoi_fk_column>
+  #       layer_name: <wms_id>             # technical id (lowercase, hyphens ok)
+  #       srid: 4674
+  #       enabled: true
+  #       where_clause: "1=1"
+  #       display_name: <ui_label>         # human-readable map label
+  #       group_key: <group_key>           # map.group_names key (or new key)
+  #       active_default: false
+  #       color: "#2563EB"
+  #       fill_color: transparent
+  layers: []
   jobs:
     level1: true
     level2: true
     level3: true
     area_of_interest: true
+    layer_jobs: false
   parallelization:
     level1:
       thread_pool_size: 1

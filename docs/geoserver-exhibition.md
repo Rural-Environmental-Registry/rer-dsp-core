@@ -23,13 +23,14 @@ GeoServer Exhibition reads **only** `dsp-geoserver-exhibition-db` — not `dsp-d
 | `DB_NAME` | `dsp-geoserver-exhibition-db` (default) |
 | `DB_SCHEMA` | `dsp` |
 
-Tables and data come from init SQL (`config/db/dsp-geoserver-exhibition-db/`) and the migration job dual-write (`spring.datasource.geo-target`).
+Tables and data come from init SQL (`config/db/dsp-geoserver-exhibition-db/`) for the four fixed layers, and from the migration job (`spring.datasource.geo-target`). Generic layers are created by the job (DDL via introspection) — no init SQL entry is required.
 
-## SRS por layer
+## SRS per layer
 
-Native SRS of each layer follows the job YAML `srid` for that table — **not** hardcoded in populate or DDL. The generic template defaults to `4326`; set the SRID that matches your source data.
+- Fixed layers (L1–L3, AOI): native SRS from `.env` `LAYER_SRS_*` (set by `./config.sh`).
+- Extra layers: `layers[].srs` in `mapLayersConfig.json` (generated from `etl.layers[].srid`).
 
-When validating, check `ST_SRID(geometry)` in exhibition-db against the YAML `srid` of the corresponding job block.
+When validating, check geometry SRID in exhibition-db against the configured SRS.
 
 ## Build
 
@@ -38,6 +39,7 @@ When validating, check `ST_SRID(geometry)` in exhibition-db against the YAML `sr
 - Compose build uses `network: host` so `apt-get` can resolve Ubuntu mirrors (BuildKit bridge DNS sometimes fails locally).
 - Populate: `/opt/populate_geoserver.sh` (workspace `dsp`, PostGIS datastore → `dsp-geoserver-exhibition-db`)
 - Map config mount: `config/map/mapLayersConfig.json` → `/config/mapLayersConfig.json`
+- Image includes `jq` and `postgresql-client` (geometry type introspection for SLD)
 
 Manual build if needed:
 
@@ -45,9 +47,11 @@ Manual build if needed:
 docker build --network=host -t dsp-geoserver-exhibition:local ./config/GeoserverExhibition/docker
 ```
 
-GeoServer does **not** create database tables. Tables come from [`config/db/dsp-geoserver-exhibition-db/`](../config/db/dsp-geoserver-exhibition-db/); data from the migration job.
+GeoServer does **not** create database tables. Fixed tables come from [`config/db/dsp-geoserver-exhibition-db/`](../config/db/dsp-geoserver-exhibition-db/); generic tables and all data come from the migration job. **Always migrate before populate.**
 
-## Layer name contract (three sides)
+## Layer name contract
+
+### Fixed layers
 
 | PostGIS table | Populate / WMS | Job `layer-name` |
 | --- | --- | --- |
@@ -56,20 +60,21 @@ GeoServer does **not** create database tables. Tables come from [`config/db/dsp-
 | `dsp.territory_level_3` | `dsp:territory-level-3` | `territory-level-3` |
 | `dsp.area_of_interest` | `dsp:area-of-interest` | `area-of-interest` |
 
-- **Populate** publishes fixed FeatureTypes and syncs SLD colors from the mounted `mapLayersConfig.json`.
-- **`mapLayersConfig.json`** must keep those four `layers` ids and valid `style.color` / `style.fillColor` — validated by `./setup.sh` and `./start.sh`.
-- **Job `layer-name`** identifies the published layer for future GeoServer cache invalidation (`GeoCacheUpdateListener`).
+### Generic layers
 
-Style names created by populate:
+| PostGIS table | Populate / WMS | Job `layer-name` |
+| --- | --- | --- |
+| `dsp.<table>` | `dsp:<layer_name>` | `<layer_name>` (default = table name) |
 
-- `dsp_territory_level_1`
-- `dsp_territory_level_2`
-- `dsp_territory_level_3`
-- `dsp_area_of_interest`
+- **Populate** iterates **all** entries in the mounted `mapLayersConfig.json` (not a hardcoded list of four).
+- For each layer it syncs SLD (point / line / polygon from `geometry_columns`) and publishes the FeatureType when missing.
+- Extra layers require `nativeName` (PostGIS table) and `srs` in the JSON.
+- The four fixed WMS ids remain mandatory and are validated by `./setup.sh` / `./start.sh`.
+- Style name: `dsp_<layer_name_with_underscores>` (e.g. `dsp_territory_level_1`, `dsp_<layer_name>`).
 
 Re-running populate updates existing styles when colors change in the active JSON.
 
-See also [map-layers-config.md](map-layers-config.md) · [databases.md](databases.md).
+See also [map-layers-config.md](map-layers-config.md) · [databases.md](databases.md) · [migration-config.md](migration-config.md).
 
 ## Manual commands
 

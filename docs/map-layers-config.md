@@ -30,7 +30,10 @@ The backend does **not** require this JSON to be packaged in the jar when runnin
    - `dsp:territory-level-3`
    - `dsp:area-of-interest`
 4. They also validate `style.color` / `style.fillColor` and display each layer before confirmation.
-5. Run `./setup.sh` to publish the layers; use `./start.sh` day to day.
+5. Optional **generic layers** are asked by the wizard (stage 5, after enabling layer jobs) and stored
+   under `etl.layers`. They are appended to the JSON with `nativeName` and `srs`, and validated in
+   addition to the four required IDs.
+6. Run `./setup.sh` to publish all layers from the JSON; use `./start.sh` day to day.
 
 ## Shape
 
@@ -41,13 +44,52 @@ The backend does **not** require this JSON to be packaged in the jar when runnin
 | `groups[].key` | Stable group identifier |
 | `groups[].layers` | WMS layers in the group |
 | `layers[].baseUrl` | Fixed GeoServer WMS base URL from the core template |
-| `layers[].layers` | WMS `layers` parameter (workspace:layer) — **fixed ids**, validated by `start.sh` |
+| `layers[].layers` | WMS `layers` parameter (`workspace:layer`) |
 | `layers[].name` | Display name (free to edit) |
 | `layers[].activeDefault` | Whether the layer is on by default |
 | `layers[].style.color` | Stroke color used by GeoServer SLD (`#RGB` or `#RRGGBB`) |
 | `layers[].style.fillColor` | Fill color (`transparent` or `#RGB` / `#RRGGBB`) |
+| `layers[].nativeName` | PostGIS table name in schema `dsp` (**required for extra layers**) |
+| `layers[].srs` | Layer SRS, e.g. `EPSG:4674` (**required for extra layers**) |
+
+The four fixed territorial / AOI layer ids must stay present. Additional groups and layers are allowed.
 
 Basemaps are still loaded from the backend classpath (`baseMapConfig.json`) unless overridden separately.
+
+## Generic layers (`etl.layers`)
+
+Declare extra layers with `./config.sh` (answer yes to *Run generic layer jobs*, then add one entry per layer) or by editing [`adopter-config.yaml`](../config/adopter/adopter-config.yaml.example) directly. Each entry drives:
+
+1. Migration job YAML (`batch.layers` + `execution-jobs.layer-jobs`)
+2. Map UI entry in `mapLayersConfig.json`
+3. GeoServer FeatureType + SLD via `./setup.sh` populate
+
+```yaml
+etl:
+  layers:
+    - source_table: <schema>.<table>   # origin schema (e.g. public) — never dsp
+      area_of_interest_id_column: <aoi_fk_column>
+      layer_name: <wms_id>           # technical id: ^[a-z0-9][a-z0-9_-]*$ → dsp:<wms_id>
+      srid: 4674
+      enabled: true
+      display_name: <ui_label>       # human-readable map label (any language)
+      group_key: <group_key>         # map.group_names key (or a new key)
+      active_default: false
+      color: "#2563EB"
+      fill_color: transparent
+  jobs:
+    layer_jobs: true
+```
+
+### Naming rules
+
+| Field | Role | Rules |
+| --- | --- | --- |
+| `source_table` | Origin PostGIS table | `schema.table` from the **source** database. Schema `dsp` is reserved for the migration destination (`dsp.<table>` on exhibition-db). |
+| `layer_name` | Technical WMS id | Lowercase letters, digits, hyphens, underscores only (`area-seguranca-300m`). Published as `dsp:<layer_name>`. |
+| `display_name` | Map panel label | Free text (accents, spaces, any language). Not used as WMS id. |
+
+`map.group_names` accepts extra keys matching `group_key`. Adding another layer is a new list item — no application code changes.
 
 ## Default colors (template)
 
@@ -62,9 +104,9 @@ Territory defaults are a black-to-gray scale (L1 → L3). Change them in the act
 
 ## Adopter changes
 
-1. Run `./config.sh` to configure display names and colors.
-2. WMS URLs remain fixed; keep the four `layers` IDs unchanged.
-3. Run `./setup.sh` so GeoServer Exhibition regenerates SLDs from the generated file.
+1. Run `./config.sh` to configure display names, colors, and generic layers.
+2. WMS base URL remains fixed; keep the four required `layers` IDs unchanged.
+3. Run `./setup.sh` so GeoServer Exhibition publishes / regenerates SLDs from the generated file.
 4. Restart the backend after edits (config is cached at startup).
 
 ## Related APIs

@@ -61,50 +61,68 @@ Cada reexecução usa detecção de mudanças (`change-detection-strategy: DEFAU
 | `spring.datasource.geo-target` | `dsp-geoserver-exhibition-db` | Geometria completa para o GeoServer |
 | `spring.datasource.batch` | `dsp-job-migration-db` | Metadados Spring Batch |
 
-## Contrato ETL (`batch`)
+## ETL contract (`batch`)
 
-Quatro jobs fixos: `admin-unit.level-1`, `level-2`, `level-3` e `area-of-interest`.
+Four fixed jobs: `admin-unit.level-1`, `level-2`, `level-3`, and `area-of-interest`, plus optional **generic layers** under `batch.layers`.
 
-### Campos por entidade
+### Fixed entity fields
 
-| Campo | Função |
+| Field | Role |
 | --- | --- |
-| `source-table` | Tabela ou subquery SQL na origem |
-| `target-table` | Tabela destino (`dsp.territory_level_*` ou `dsp.area_of_interest`) |
-| `primary-key` | Coluna PK na origem |
-| `partition-column` | Particionamento paralelo (L2/L3; em geral o parent) |
-| `geometry-column` | Coluna geométrica na origem |
-| `where-clause` | Filtro SQL adicional |
-| `comparison-columns` | Colunas para detecção de mudança |
-| `persist-columns` | Colunas gravadas em business + exhibition |
-| `business-only-persist-columns` | Só `dsp-db` (ex.: medidas `theme_*`) |
-| `column-mapping` | Mapa origem → coluna destino |
-| `layer-name` | Nome da layer no GeoServer |
-| `srid` | SRID aplicado na persistência |
-| `change-detection-strategy` | Em geral `DEFAULT` |
+| `source-table` | Source table or SQL subquery |
+| `target-table` | Target table (`dsp.territory_level_*` or `dsp.area_of_interest`) |
+| `primary-key` | Source PK column |
+| `partition-column` | Parallel partition key (L2/L3; usually parent) |
+| `geometry-column` | Source geometry column |
+| `where-clause` | Extra SQL filter |
+| `comparison-columns` | Columns used for change detection |
+| `persist-columns` | Columns written to business + exhibition |
+| `business-only-persist-columns` | `dsp-db` only (e.g. `theme_*` measures) |
+| `column-mapping` | Source → target column map |
+| `layer-name` | GeoServer layer name (without workspace) |
+| `srid` | SRID applied on persist |
+| `change-detection-strategy` | Usually `DEFAULT` |
 
-### Destinos esperados no `column-mapping`
+### Generic layers (`batch.layers`)
 
-**Níveis territoriais (L1–L3):** `id`, `name`, `geometry`; em L2/L3 também `parent_id`.
+Generated from `etl.layers` in `adopter-config.yaml` by `./config.sh`. Each item migrates **only** to geo-target (`dsp.<table>`). WMS publishing is owned by core (`./setup.sh` → `populate_geoserver.sh`), not by the job.
 
-**Área de interesse:** `id`, `registration_date`, `alteration_date`, `territory_level_3_id`, `area`, `geometry`; opcionalmente `theme_1`…`theme_4`.
+| Field | Role |
+| --- | --- |
+| `source-table` | Source `schema.table` (required) |
+| `area-of-interest-id-column` | Source column linking each feature to an AOI (required) |
+| `layer-name` | WMS id without workspace; default = table name |
+| `srid` | Source / target SRID |
+| `where-clause` | Optional filter (default `1=1`) |
+| `primary-key` / `geometry-column` | Optional overrides when introspection is ambiguous |
+| `enabled` | Skip when `false` |
 
-KPIs da UI leem `theme_*` via [installation-config](installation-config.md) (`THEME_1`…`THEME_4`). Os rótulos ficam no JSON de instalação; o YAML só mapeia as colunas numéricas.
+Enable with `execution-jobs.layer-jobs: true` (also `etl.jobs.layer_jobs` in adopter-config).
+
+See [map-layers-config.md](map-layers-config.md) for presentation fields (`display_name`, colors, groups).
+
+### Expected `column-mapping` targets (fixed jobs)
+
+**Territory levels (L1–L3):** `id`, `name`, `geometry`; L2/L3 also `parent_id`.
+
+**Area of interest:** `id`, `registration_date`, `alteration_date`, `territory_level_3_id`, `area`, `geometry`; optionally `theme_1`…`theme_4`.
+
+UI KPIs read `theme_*` via [installation-config](installation-config.md) (`THEME_1`…`THEME_4`). Labels live in the installation JSON; the YAML only maps numeric columns.
 
 The guided configuration asks for the number of available theme KPIs before
 asking for their source columns. Themes that are not selected are omitted from
 `business-only-persist-columns` and `column-mapping`.
 
-## Paralelismo e jobs
+## Parallelism and jobs
 
-- `parallelization.jobs.*` — threads, chunk e page size por job.
-- `execution-jobs.*` — liga/desliga cada job (`true`/`false`).
+- `parallelization.jobs.*` — threads, chunk, and page size per job.
+- `execution-jobs.*` — enable/disable each job (`true`/`false`), including `layer-jobs`.
 
-Ajuste conforme o volume da sua origem.
+Tune for your source volume.
 
-## Relacionados
+## Related
 
-- Bancos e schema destino: [databases.md](databases.md)
-- Labels de hierarquia e KPIs: [installation-config.md](installation-config.md)
-- Camadas WMS: [map-layers-config.md](map-layers-config.md)
+- Target databases and schemas: [databases.md](databases.md)
+- Hierarchy and KPI labels: [installation-config.md](installation-config.md)
+- WMS layers: [map-layers-config.md](map-layers-config.md)
 - GeoServer Exhibition: [geoserver-exhibition.md](geoserver-exhibition.md)

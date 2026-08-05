@@ -190,6 +190,7 @@ REQUIRED = {
     "dsp:area-of-interest",
 }
 HEX = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+EPSG = re.compile(r"^(EPSG:)?[0-9]+$", re.IGNORECASE)
 
 with open(sys.argv[1], encoding="utf-8") as f:
     data = json.load(f)
@@ -215,8 +216,8 @@ if missing:
         print(f"  - {item}")
     sys.exit(1)
 
-for lid in sorted(REQUIRED):
-    style = (by_id[lid].get("style") or {})
+def validate_style(lid, layer):
+    style = (layer.get("style") or {})
     color = style.get("color")
     fill = style.get("fillColor")
     if not isinstance(color, str) or not color.strip():
@@ -230,8 +231,24 @@ for lid in sorted(REQUIRED):
             f"{lid}: style.fillColor must be 'transparent' or #RGB/#RRGGBB (got {fill!r})"
         )
 
+for lid in sorted(REQUIRED):
+    validate_style(lid, by_id[lid])
+
+for lid, layer in sorted(by_id.items()):
+    if lid in REQUIRED:
+        continue
+    validate_style(lid, layer)
+    native = layer.get("nativeName")
+    if not isinstance(native, str) or not native.strip():
+        errors.append(f"{lid}: nativeName is required for extra layers")
+    srs = layer.get("srs")
+    if not isinstance(srs, str) or not srs.strip() or not EPSG.match(srs.strip()):
+        errors.append(
+            f"{lid}: srs is required for extra layers (integer or EPSG:n, got {srs!r})"
+        )
+
 if errors:
-    print("INVALID layer style colors:")
+    print("INVALID layer configuration:")
     for item in errors:
         print(f"  - {item}")
     sys.exit(1)
@@ -239,6 +256,7 @@ sys.exit(0)
 PY
   then
     error "mapLayersConfig.json must keep the four WMS layer ids and valid style colors."
+    error "Extra layers also need nativeName, srs, and valid style colors."
     error "Ids must match GeoServer Exhibition populate and job layer-name."
     error "style.color: #RGB or #RRGGBB; style.fillColor: transparent or #RGB/#RRGGBB."
     exit 1
@@ -257,7 +275,7 @@ ensure_map_layers_config() {
     "Map layers config" \
     "$example" \
     "$active" \
-    "baseUrl / display names / style.color and style.fillColor (keep the four WMS layer ids unchanged)"
+    "baseUrl / display names / style colors (keep the four required WMS ids; extras need nativeName + srs)"
 
   print_map_layers_preview "$active"
   validate_map_layers_wms_ids "$active"

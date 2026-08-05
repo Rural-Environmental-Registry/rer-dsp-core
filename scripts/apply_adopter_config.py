@@ -15,6 +15,18 @@ from typing import Any
 
 FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
 HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+LAYER_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+DESTINATION_SCHEMA = "dsp"
+FIXED_GROUP_KEYS = {
+    "territorial_division": "dt",
+    "areas_of_interest": "ird",
+}
+FIXED_LAYER_IDS = {
+    "dsp:territory-level-1",
+    "dsp:territory-level-2",
+    "dsp:territory-level-3",
+    "dsp:area-of-interest",
+}
 
 try:
     import yaml
@@ -248,6 +260,235 @@ def sync_map_layer_names(config: dict[str, Any]) -> bool:
     return changed
 
 
+def table_name_from_source(source_table: str) -> str:
+    """Return the unqualified table name (schema discarded), matching the job contract."""
+    qualified = str(source_table).strip()
+    if "." not in qualified:
+        raise ValueError(
+            f"etl.layers source_table must be schema.table (got {source_table!r})."
+        )
+    return qualified.rsplit(".", 1)[-1].strip()
+
+
+def source_schema_from_table(source_table: str) -> str:
+    """Return the schema part of schema.table."""
+    qualified = str(source_table).strip()
+    if "." not in qualified:
+        raise ValueError(
+            f"etl.layers source_table must be schema.table (got {source_table!r})."
+        )
+    return qualified.rsplit(".", 1)[0].strip()
+
+
+def validate_layer_name(layer_name: str, prefix: str = "layer_name") -> str:
+    """Ensure layer_name is a valid technical WMS id (lowercase, no spaces/accents)."""
+    value = layer_name.strip()
+    if not LAYER_NAME_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{prefix} must match ^[a-z0-9][a-z0-9_-]*$ "
+            f"(lowercase letters, digits, hyphens, underscores; got {layer_name!r}). "
+            "Use display_name for the human-readable label."
+        )
+    return value
+
+
+def validate_source_table_schema(source_table: str, prefix: str) -> None:
+    """Reject dsp.* — that schema is reserved for the migration destination."""
+    schema = source_schema_from_table(source_table).lower()
+    if schema == DESTINATION_SCHEMA:
+        table = table_name_from_source(source_table)
+        raise ValueError(
+            f"{prefix}.source_table must use the origin schema, not '{DESTINATION_SCHEMA}'. "
+            f"The job migrates schema.table → {DESTINATION_SCHEMA}.{table}. "
+            f"Example: public.{table}"
+        )
+
+
+def resolve_layer_name(entry: dict[str, Any]) -> str:
+    explicit = entry.get("layer_name")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    return table_name_from_source(entry["source_table"])
+
+
+def normalize_epsg(srid: Any) -> str:
+    if isinstance(srid, int):
+        return f"EPSG:{srid}"
+    if isinstance(srid, str):
+        value = srid.strip()
+        if value.upper().startswith("EPSG:"):
+            return f"EPSG:{value.split(':', 1)[1].strip()}"
+        if value.isdigit():
+            return f"EPSG:{value}"
+    raise ValueError(f"Invalid srid value: {srid!r} (expected integer or EPSG:n).")
+
+
+def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate and normalize etl.layers entries. Returns enabled layers only."""
+    raw_layers = get(values, "etl", "layers", default=[])
+    if raw_layers is None:
+        return []
+    if not isinstance(raw_layers, list):
+        raise ValueError("etl.layers must be a list.")
+
+    seen_tables: set[str] = set()
+    seen_wms: set[str] = set(FIXED_LAYER_IDS)
+    enabled: list[dict[str, Any]] = []
+
+    for index, entry in enumerate(raw_layers):
+        prefix = f"etl.layers[{index}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{prefix} must be a mapping.")
+        if entry.get("enabled", True) is False:
+            continue
+
+        source_table = entry.get("source_table")
+        if not isinstance(source_table, str) or not source_table.strip():
+            raise ValueError(f"{prefix}.source_table is required.")
+        if "<" in source_table:
+            raise ValueError(f"{prefix}.source_table still contains a placeholder.")
+        validate_source_table_schema(source_table.strip(), prefix)
+
+        aoi_column = entry.get("area_of_interest_id_column")
+        if not isinstance(aoi_column, str) or not aoi_column.strip():
+            raise ValueError(f"{prefix}.area_of_interest_id_column is required.")
+
+        table = table_name_from_source(source_table)
+        if table in seen_tables:
+            raise ValueError(
+                f"{prefix}: duplicate target table dsp.{table} "
+                "(two source tables must not share the same table name)."
+            )
+        seen_tables.add(table)
+
+        layer_name = validate_layer_name(resolve_layer_name(entry), f"{prefix}.layer_name")
+        wms_id = f"dsp:{layer_name}"
+        if wms_id in seen_wms:
+            raise ValueError(f"{prefix}: WMS id {wms_id} collides with another layer.")
+        seen_wms.add(wms_id)
+
+        if "srid" not in entry or entry.get("srid") in (None, ""):
+            raise ValueError(f"{prefix}.srid is required.")
+        srs = normalize_epsg(entry["srid"])
+
+        display_name = entry.get("display_name") or layer_name
+        if not isinstance(display_name, str) or not display_name.strip():
+            raise ValueError(f"{prefix}.display_name must be a non-empty string.")
+
+        group_key = entry.get("group_key") or "extra_layers"
+        if not isinstance(group_key, str) or not group_key.strip():
+            raise ValueError(f"{prefix}.group_key must be a non-empty string.")
+        group_key = group_key.strip()
+
+        color = entry.get("color", "#2563EB")
+        fill_color = entry.get("fill_color", "transparent")
+        if not isinstance(color, str) or not HEX_COLOR.fullmatch(color):
+            raise ValueError(f"{prefix}.color must be a #RGB or #RRGGBB value.")
+        if not isinstance(fill_color, str) or (
+            fill_color != "transparent" and not HEX_COLOR.fullmatch(fill_color)
+        ):
+            raise ValueError(
+                f"{prefix}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
+            )
+
+        normalized = {
+            "source_table": source_table.strip(),
+            "area_of_interest_id_column": aoi_column.strip(),
+            "layer_name": layer_name,
+            "table": table,
+            "wms_id": wms_id,
+            "srs": srs,
+            "srid": int(srs.split(":", 1)[1]),
+            "display_name": display_name.strip(),
+            "group_key": group_key,
+            "active_default": bool(entry.get("active_default", False)),
+            "color": color,
+            "fill_color": fill_color,
+            "where_clause": str(entry.get("where_clause") or "1=1"),
+            "enabled": True,
+        }
+        for optional in ("primary_key", "geometry_column"):
+            value = entry.get(optional)
+            if isinstance(value, str) and value.strip():
+                normalized[optional] = value.strip()
+        enabled.append(normalized)
+    return enabled
+
+
+def build_extra_map_layer(entry: dict[str, Any], group_json_key: str) -> dict[str, Any]:
+    layer_name = entry["layer_name"]
+    stable_key = f"{group_json_key}_{layer_name}".replace("-", "_")
+    active = bool(entry["active_default"])
+    return {
+        "baseUrl": FIXED_WMS_BASE_URL,
+        "layers": entry["wms_id"],
+        "format": "image/png",
+        "transparent": True,
+        "name": entry["display_name"],
+        "activeDefault": active,
+        "active": active,
+        "key": stable_key,
+        "nativeName": entry["table"],
+        "srs": entry["srs"],
+        "toggle": {"active": "On", "inactive": "Off"},
+        "style": {
+            "color": entry["color"],
+            "fillColor": entry["fill_color"],
+        },
+    }
+
+
+def append_extra_layers_to_map(
+    layers_doc: dict[str, Any],
+    values: dict[str, Any],
+    extra_layers: list[dict[str, Any]],
+) -> None:
+    """Append generic layers into mapLayersConfig groups (creates groups as needed)."""
+    if not extra_layers:
+        return
+
+    group_names = get(values, "map", "group_names", default={}) or {}
+    groups_by_key: dict[str, dict[str, Any]] = {
+        group["key"]: group for group in layers_doc.get("groups", [])
+    }
+
+    for entry in extra_layers:
+        adopter_group_key = entry["group_key"]
+        json_key = FIXED_GROUP_KEYS.get(adopter_group_key, adopter_group_key)
+        group = groups_by_key.get(json_key)
+        if group is None:
+            display = group_names.get(adopter_group_key, adopter_group_key.replace("_", " ").title())
+            group = {
+                "name": display,
+                "key": json_key,
+                "toggle": {"active": "On", "inactive": "Off"},
+                "layers": [],
+            }
+            layers_doc.setdefault("groups", []).append(group)
+            groups_by_key[json_key] = group
+        elif adopter_group_key in group_names:
+            group["name"] = group_names[adopter_group_key]
+        group.setdefault("layers", []).append(build_extra_map_layer(entry, json_key))
+
+
+def build_batch_layers(extra_layers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    batch_layers: list[dict[str, Any]] = []
+    for entry in extra_layers:
+        item: dict[str, Any] = {
+            "source-table": entry["source_table"],
+            "area-of-interest-id-column": entry["area_of_interest_id_column"],
+            "layer-name": entry["layer_name"],
+            "srid": entry["srid"],
+            "where-clause": entry["where_clause"],
+            "enabled": True,
+        }
+        if "primary_key" in entry:
+            item["primary-key"] = entry["primary_key"]
+        if "geometry_column" in entry:
+            item["geometry-column"] = entry["geometry_column"]
+        batch_layers.append(item)
+    return batch_layers
+
 def apply_screen_text_overrides(
     installation: dict[str, Any],
     screens_yaml: dict[str, Any],
@@ -370,6 +611,142 @@ def ask_screen_text_fields(screens: dict[str, Any]) -> None:
         "Prefix shown before download filters.",
         "the downloads screen",
     )
+
+
+def ask_generic_layer_entry(
+    config: dict[str, Any],
+    entry: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Ask every field of one generic layer (migration + map presentation)."""
+    entry = copy.deepcopy(entry) if entry else {}
+
+    while True:
+        source_table = str(
+            ask_field(
+                "Source table", entry.get("source_table", ""),
+                "Origin table (schema.table). Destination is always dsp.<table> — do not use schema 'dsp'.",
+                "the migration job (reads from your source database)",
+            )
+        ).strip()
+        if "." not in source_table or "<" in source_table:
+            print("\n  Enter the origin table as schema.table (e.g. public.my_layer).")
+            continue
+        try:
+            validate_source_table_schema(source_table, "etl.layers")
+        except ValueError as exc:
+            print(f"\n  {exc}")
+            continue
+        break
+    entry["source_table"] = source_table
+
+    while True:
+        aoi_column = str(
+            ask_field(
+                "Area of interest ID column", entry.get("area_of_interest_id_column", ""),
+                "Source column linking each feature to an area of interest.",
+                "the migration job (becomes area_of_interest_id)",
+            )
+        ).strip()
+        if aoi_column and "<" not in aoi_column:
+            break
+        print("\n  Enter the source column name.")
+    entry["area_of_interest_id_column"] = aoi_column
+
+    default_layer_name = entry.get("layer_name") or source_table.rsplit(".", 1)[-1]
+    while True:
+        raw_name = str(
+            ask_field(
+                "Layer name", default_layer_name,
+                "Technical WMS id (lowercase, digits, hyphens, underscores). Published as dsp:<name>.",
+                "GeoServer and the map layer selector",
+            )
+        ).strip()
+        try:
+            entry["layer_name"] = validate_layer_name(raw_name, "layer_name")
+            break
+        except ValueError as exc:
+            print(f"\n  {exc}")
+
+    entry["srid"] = ask_int_field(
+        "Layer SRID", entry.get("srid", 4674),
+        "Coordinate reference system identifier of the source geometry.",
+        "ETL geometry conversion and GeoServer layers",
+        minimum=1,
+    )
+
+    entry["display_name"] = ask_field(
+        "Display name", entry.get("display_name") or entry["layer_name"],
+        "Human-readable label shown in the map panel (any language).",
+        "the map layer selector",
+    )
+
+    group_names = config["map"]["group_names"]
+    group_key = str(
+        ask_field(
+            "Map group key", entry.get("group_key", "thematic"),
+            f"Group holding this layer. Existing keys: {', '.join(sorted(group_names))}.",
+            "the map layer selector",
+        )
+    ).strip()
+    entry["group_key"] = group_key
+    if group_key not in group_names:
+        group_names[group_key] = ask_field(
+            f"Map group name — {group_key}", group_key.replace("_", " ").capitalize(),
+            "Title of this layer group in the map.",
+            "the map layer selector",
+        )
+
+    entry["active_default"] = ask_bool_field(
+        "Enable this layer by default", bool(entry.get("active_default", False)),
+        "Whether the layer starts enabled when the map opens.",
+        "the initial map state",
+    )
+    entry["color"] = ask_color_field(
+        "Stroke color", entry.get("color", "#2563EB"),
+        "Line color used to draw the layer.",
+        "the map and generated GeoServer style",
+    )
+    entry["fill_color"] = ask_color_field(
+        "Fill color", entry.get("fill_color", "transparent"),
+        "Fill color used inside the layer; use transparent when needed.",
+        "the map and generated GeoServer style",
+        allow_transparent=True,
+    )
+    entry["where_clause"] = ask_field(
+        "where-clause", entry.get("where_clause", "1=1"),
+        "Optional SQL filter applied while reading this layer.",
+        "the ETL source query",
+    )
+    entry["enabled"] = True
+    return entry
+
+
+def ask_generic_layers(config: dict[str, Any]) -> None:
+    """Review, edit, and add generic layers under etl.layers."""
+    etl = config["etl"]
+    declared = list(etl.get("layers") or [])
+    result: list[dict[str, Any]] = []
+
+    print("\n  Generic layers")
+    print("  What: extra source tables migrated to dsp.<table> and published as WMS layers.")
+    print("  Used in: the migration job, GeoServer publishing, and the map layer selector")
+
+    for item in declared:
+        if not isinstance(item, dict):
+            continue
+        print(f"\n  Declared layer: {item.get('source_table', '<unset>')}")
+        if not ask_bool("  Keep this layer", True):
+            continue
+        if ask_bool("  Edit this layer", False):
+            item = ask_generic_layer_entry(config, item)
+        result.append(item)
+
+    add_next = not result
+    while ask_bool("\n  Add a generic layer" if not result else "\n  Add another generic layer", add_next):
+        result.append(ask_generic_layer_entry(config, None))
+        add_next = False
+
+    etl["layers"] = result
 
 
 def ask_data_preparation_flow() -> bool:
@@ -624,6 +1001,23 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
             "Whether this entity should be loaded during migration.",
             "the ETL execution plan",
         )
+    config["etl"]["jobs"]["layer_jobs"] = ask_bool_field(
+        "Run generic layer jobs",
+        bool(config["etl"]["jobs"].get("layer_jobs", False)),
+        "Whether extra layers (etl.layers) should be migrated and published.",
+        "the ETL execution plan",
+    )
+    if config["etl"]["jobs"]["layer_jobs"]:
+        ask_generic_layers(config)
+        if not config["etl"].get("layers"):
+            print("\n  Note: no generic layer declared; the layer jobs have nothing to migrate.")
+    else:
+        declared = len(config["etl"].get("layers") or [])
+        if declared:
+            print(
+                f"\n  Note: {declared} generic layer(s) stay declared in etl.layers "
+                "but will not be migrated while layer jobs are disabled."
+            )
 
     active.parent.mkdir(parents=True, exist_ok=True)
     active.write_text(
@@ -762,6 +1156,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             raise ValueError(
                 f"map.layers.{layer_name}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
             )
+    extra_layers = validate_extra_layers(values)
     kpis = get(values, "installation", "kpis", default={})
     for code in enabled_kpi_codes(theme_count):
         accent_color = get(kpis, code, "accent_color")
@@ -858,7 +1253,9 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
                 "fill_color", layer["style"]["fillColor"]
             )
         group_key = "territorial_division" if group["key"] == "dt" else "areas_of_interest"
-        group["name"] = get(values, "map", "group_names", group_key, default=group["name"])
+        if group["key"] in ("dt", "ird"):
+            group["name"] = get(values, "map", "group_names", group_key, default=group["name"])
+    append_extra_layers_to_map(layers, values, extra_layers)
     map_file = root / "config/map/mapLayersConfig.json"
     map_file.write_text(json.dumps(layers, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -908,6 +1305,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         aoi["business-only-persist-columns"].append(source)
         if key in aoi["column-mapping"]:
             aoi["column-mapping"][source] = aoi["column-mapping"].pop(key)
+    migration["batch"]["layers"] = build_batch_layers(extra_layers)
     jobs = etl.get("jobs", {})
     job_names = {
         "level1": "admin-unit-level-1-geoserver-job",
@@ -917,11 +1315,15 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     }
     for name, target in job_names.items():
         migration["execution-jobs"][target] = bool(jobs.get(name, True))
+    layer_jobs_enabled = bool(jobs.get("layer_jobs", bool(extra_layers)))
+    migration["execution-jobs"]["layer-jobs"] = layer_jobs_enabled
     output = root / "config/Job-Data-Migration/application/application.yaml"
     output.write_text(dump_yaml(migration), encoding="utf-8")
     replace_env(root / ".env", values)
     if not quiet:
         print("Configuration files generated successfully.")
+        if extra_layers:
+            print(f"  Generic layers: {len(extra_layers)} (layer-jobs={layer_jobs_enabled})")
         print("\nNext steps:")
         print(f"  1. Review: {active}")
         print(
@@ -929,7 +1331,6 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         )
         print("  3. Run ./setup.sh and choose option 2 (migrate) or 3 (no migration).")
         print("  4. Run ./start.sh to start the application.")
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
