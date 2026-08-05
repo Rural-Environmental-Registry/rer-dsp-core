@@ -33,7 +33,7 @@ INCLUDE_MIGRATION_DB="${INCLUDE_MIGRATION_DB:-false}"
 if [ "$SETUP_MODE" = "demo" ]; then
   info "Mode: demonstration (built-in seed)"
 elif [ "$WILL_MIGRATE" = "true" ]; then
-  info "Mode: real adopter setup with ETL migration"
+  info "Mode: real adopter setup with ETL migration (${MIGRATION_EXECUTION_MODE:-once})"
 else
   info "Mode: real adopter setup without migration"
 fi
@@ -145,9 +145,14 @@ step_header 9 "Databases (+ migration)"
 start_databases_and_wait "$INCLUDE_MIGRATION_DB"
 
 if [ "$WILL_MIGRATE" = "true" ]; then
-  info "Running data migration (profile=migration)..."
-  docker compose --env-file .env --profile migration run --rm --build dsp-job-migration
-  ok "Migration finished"
+  info "Running initial data migration (profile=migration)..."
+  run_migration_job_once
+  ok "Initial migration finished"
+  set_env_var "DSP_MIGRATION_EXECUTION_MODE" "${MIGRATION_EXECUTION_MODE:-once}"
+  if [ "${MIGRATION_EXECUTION_MODE:-once}" = "continuous" ]; then
+    start_migration_service_stack
+    ok "Migration service stack is running for external scheduling"
+  fi
 else
   info "Data migration skipped (option 3 — real adopter without ETL)."
 fi
@@ -162,6 +167,9 @@ echo "Next: start the application stacks with:"
 echo "  ./start.sh"
 echo ""
 echo "Day-to-day: prefer ./start.sh (does not re-run migration)."
+if [ "${MIGRATION_EXECUTION_MODE:-once}" = "continuous" ]; then
+  print_migration_resync_hints
+fi
 echo "Rebuild only frontend: docker compose up -d --build dsp-frontend"
 echo "Reset DBs (lose data): docker compose down -v && ./setup.sh"
 echo ""

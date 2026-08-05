@@ -79,11 +79,14 @@ services:
     profiles:
       - migration
     restart: "no"
+    entrypoint: ["/migration-entrypoint.sh"]
     volumes:
       - ./config/Job-Data-Migration/application/application.yaml:/config/application.yaml:ro
+      - ./config/Job-Data-Migration/docker/entrypoint.sh:/migration-entrypoint.sh:ro
     environment:
       SPRING_CONFIG_LOCATION: file:/config/application.yaml
       SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      DSP_MIGRATION_EXECUTION_MODE: ${DSP_MIGRATION_EXECUTION_MODE:-once}
       DSP_SOURCE_JDBC_URL: ${DSP_SOURCE_JDBC_URL}
       DSP_SOURCE_DB_USER: ${DSP_SOURCE_DB_USER}
       DSP_SOURCE_DB_PASSWORD: ${DSP_SOURCE_DB_PASSWORD}

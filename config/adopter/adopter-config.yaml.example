@@ -37,27 +37,27 @@ installation:
       label: Registered properties
       unit_of_measurement: un.
       optional_label: ha
-      accent_color: "#CED6E5"
+      accent_color: "#d3e500"
     theme_1:
       enabled: true
       label: Theme 1
       unit_of_measurement: un.
-      accent_color: "#E5E7EB"
+      accent_color: "#cf95e5"
     theme_2:
       enabled: true
       label: Theme 2
       unit_of_measurement: un.
-      accent_color: "#E5E7EB"
+      accent_color: "#a698e5"
     theme_3:
       enabled: true
       label: Theme 3
       unit_of_measurement: un.
-      accent_color: "#E5E7EB"
+      accent_color: "#91c9e5"
     theme_4:
       enabled: true
       label: Theme 4
       unit_of_measurement: un.
-      accent_color: "#E5E7EB"
+      accent_color: "#8ce5b5"
   area:
     unit: ha
     unit_label: ha

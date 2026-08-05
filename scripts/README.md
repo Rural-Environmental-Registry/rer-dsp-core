@@ -5,7 +5,7 @@
 | Script | Papel |
 |--------|--------|
 | [`../setup.sh`](../setup.sh) | Bancos + migração de dados ou seed + populate GeoServer (menu interativo) |
-| [`../start.sh`](../start.sh) | Sobe GeoServer + backend + frontend (dia a dia; **não** migra) |
+| [`../start.sh`](../start.sh) | Sobe GeoServer + backend + frontend; em modo `continuous`, mantém stack migration |
 | [`../config.sh`](../config.sh) | Wizard de configuração do adotante (menu: reaplicar, editar ou recomeçar) |
 | [`common.sh`](common.sh) | Helpers compartilhados (source pelos scripts) |
 
@@ -18,9 +18,14 @@
 `setup.sh` always runs interactively (no CLI flags). Options:
 
 1. **Demonstration** — built-in Brazil seed; no JDBC; no migration job DB.
-2. **Real + ETL** — requires `./config.sh`; builds/runs `dsp-job-migration`; starts batch DB.
+2. **Real + ETL** — requires `./config.sh`; submenu **once** (pontual) ou **continuous** (serviço para agendamento externo).
 3. **Real without migration** — requires `./config.sh`; empty app DBs + GeoServer only.
 4. **Stack status / cleanup** — URLs and optional `docker compose --env-file .env --profile migration down -v --rmi all`.
+
+Modo ETL (`DSP_MIGRATION_EXECUTION_MODE` no `.env`):
+
+- **once** — migração inicial no setup; job some ao terminar; `./start.sh` não sobe migration.
+- **continuous** — carga inicial + containers `dsp-job-migration-db` e `dsp-job-migration` ficam ativos; `./start.sh` os mantém. Re-sync: ver [migration-config.md](../docs/migration-config.md).
 
 `config.sh` fills `config/adopter/adopter-config.yaml`. When the file already
 exists, choose **1** to reapply, **2** to edit via wizard (current values shown

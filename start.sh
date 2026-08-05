@@ -66,7 +66,12 @@ fi
 
 step_header 6 "Confirmation"
 
-info "This script starts the application stack only (no data migration)."
+if is_continuous_migration_mode; then
+  info "Continuous migration mode — ./start.sh will keep the migration stack running."
+  info "Re-syncs are triggered externally (not scheduled by this repo)."
+else
+  info "This script starts the application stack only (no data migration)."
+fi
 info "To migrate/populate data, run ./setup.sh first (uses Docker volumes)."
 
 if ! prompt_yes_no "Do you want to continue?"; then
@@ -74,10 +79,15 @@ if ! prompt_yes_no "Do you want to continue?"; then
   exit 0
 fi
 
-step_header 7 "Databases (reuse volumes — no migration)"
+step_header 7 "Databases"
 
 start_databases_and_wait "false"
-info "Migration is not run by ./start.sh. Use ./setup.sh when you need to (re)migrate."
+ensure_migration_service_if_continuous
+if is_continuous_migration_mode; then
+  info "Migration service stack is active (continuous mode)."
+else
+  info "Migration is not run by ./start.sh. Use ./setup.sh when you need to (re)migrate."
+fi
 
 step_header 8 "GeoServer Exhibition + application containers"
 

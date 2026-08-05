@@ -25,6 +25,33 @@ O Docker Compose monta apenas o arquivo ativo em `/config/application.yaml` no c
 
 Migration remains blocked while placeholders exist in `application.yaml`.
 
+## Modos de execução
+
+Escolhidos no `./setup.sh` (opção 2 → submenu). O valor fica em `.env` como `DSP_MIGRATION_EXECUTION_MODE`.
+
+| Modo | Quando usar | Comportamento |
+| --- | --- | --- |
+| `once` | Primeira carga / import pontual | Job roda uma vez no setup (`compose run --rm`); container some ao terminar; `./start.sh` não sobe migration |
+| `continuous` | Origem muda com frequência; agendamento externo | Setup faz carga inicial + deixa `dsp-job-migration-db` e `dsp-job-migration` ativos; `./start.sh` mantém a stack migration |
+
+O modo `continuous` **não implementa agendamento** neste repositório — apenas mantém os containers prontos para outra equipe disparar re-syncs.
+
+### Re-sync manual (modo `continuous`)
+
+```bash
+# Execução pontual (recomendado)
+docker compose --env-file .env --profile migration run --rm \
+  -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration
+
+# Dentro do container em idle
+docker compose --env-file .env --profile migration exec dsp-job-migration \
+  java $JAVA_OPTS -jar /app/app.jar
+```
+
+Cada reexecução usa detecção de mudanças (`change-detection-strategy: DEFAULT`) — só registros alterados na origem são reprocessados.
+
+**Limitação:** invalidação automática de cache GeoServer após re-sync ainda não está implementada no job; re-syncs frequentes podem exigir truncate manual do GWC até essa integração existir.
+
 ## Datasources
 
 | Prefixo YAML | Destino | Observação |

@@ -14,8 +14,8 @@
 - Example adopter configuration (hierarchy, screens, KPIs, map layers)
 - Init SQL and Docker Compose for databases `dsp-db` and `dsp-job-migration-db`
 - GeoServer Exhibition (WMS for the map)
-- `./setup.sh` — data migration + GeoServer populate (once; data on Docker volumes)
-- `./start.sh` — starts backend + frontend + GeoServer (day-to-day; **no** remigration)
+- `./setup.sh` — data migration + GeoServer populate (once; data on Docker volumes); submenu once/continuous for ETL
+- `./start.sh` — starts backend + frontend + GeoServer (day-to-day; does not re-run migration; keeps migration stack in `continuous` mode)
 
 Application code lives in sibling repositories. This repo does **not** hold domain Java libraries.
 
@@ -54,8 +54,8 @@ contract keys such as WMS IDs, target tables, and KPI codes remain protected in
 the core templates.
 
 ```bash
-./setup.sh    # interactive menu: demo / real+ETL / real without migration / status
-./start.sh    # start the application (does not remigrate)
+./setup.sh    # interactive menu: demo / real+ETL (once or continuous) / real without migration / status
+./start.sh    # start the application (does not re-run migration; keeps migration stack in continuous mode)
 ```
 
 `./setup.sh` always asks how to prepare data:

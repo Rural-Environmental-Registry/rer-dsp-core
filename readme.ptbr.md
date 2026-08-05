@@ -14,8 +14,8 @@ O `rer-dsp-core` é o **hub de instalação** da stack DSP (mesmo papel do `core
 - Exemplos de configuração do adotante (hierarquia, telas, KPIs, camadas do mapa)
 - Init SQL e Docker Compose para bancos `dsp-db` e `dsp-job-migration-db`
 - GeoServer Exhibition (WMS do mapa)
-- `./setup.sh` — migração de dados + populate (uma vez; dados nos volumes Docker)
-- `./start.sh` — sobe backend + frontend + GeoServer (dia a dia; **não** remigra)
+- `./setup.sh` — migração de dados + populate (uma vez; dados nos volumes Docker); submenu once/continuous no ETL
+- `./start.sh` — sobe backend + frontend + GeoServer (dia a dia; não remigra; mantém stack migration em modo `continuous`)
 
 O código das aplicações fica nos repositórios irmãos. Este repo **não** é uma biblioteca Java de domínio.
 
@@ -52,14 +52,14 @@ O wizard gera os arquivos JSON/YAML operacionais. `setup.sh` e `start.sh`
 validam esses arquivos, mas não criam arquivos ativos a partir dos `.example`.
 
 ```bash
-./setup.sh    # menu: demo / real+ETL / real sem migração / status
-./start.sh    # sobe a aplicação (não remigra)
+./setup.sh    # menu: demo / real+ETL (once ou continuous) / real sem migração / status
+./start.sh    # sobe a aplicação (não remigra; mantém stack migration em modo continuous)
 ```
 
 O `./setup.sh` sempre pergunta como preparar os dados:
 
 1. **Demonstração** — seed Brasil embutido (sem JDBC; sem banco do job de migração)
-2. **Adotante real + ETL** — migra da fonte JDBC (`./config.sh` antes)
+2. **Adotante real + ETL** — migra da fonte JDBC (`./config.sh` antes); submenu **once** (pontual) ou **continuous** (serviço para agendamento externo)
 3. **Adotante real sem migração** — bancos vazios + GeoServer
 4. **Status da stack / limpeza**
 

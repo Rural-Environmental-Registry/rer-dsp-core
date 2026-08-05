@@ -553,6 +553,74 @@ ensure_dotenv() {
   set +a
 }
 
+set_env_var() {
+  local key="$1"
+  local value="$2"
+  local env_file="${ROOT_DIR:-.}/.env"
+
+  if [ ! -f "$env_file" ]; then
+    error ".env not found — run ensure_dotenv first."
+    exit 1
+  fi
+
+  if grep -q "^${key}=" "$env_file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$env_file"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >>"$env_file"
+  fi
+
+  set -a
+  # shellcheck disable=SC1091
+  source "$env_file"
+  set +a
+}
+
+get_migration_execution_mode() {
+  echo "${DSP_MIGRATION_EXECUTION_MODE:-once}"
+}
+
+is_continuous_migration_mode() {
+  [ "$(get_migration_execution_mode)" = "continuous" ]
+}
+
+run_migration_job_once() {
+  docker compose --env-file .env --profile migration run --rm --build \
+    -e DSP_MIGRATION_EXECUTION_MODE=once \
+    dsp-job-migration
+}
+
+start_migration_service_stack() {
+  info "Starting migration service stack (profile=migration)..."
+  docker compose --env-file .env --profile migration up -d dsp-job-migration-db dsp-job-migration
+  docker update --restart unless-stopped dsp-job-migration >/dev/null 2>&1 || true
+
+  info "Waiting for dsp-job-migration-db..."
+  if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
+    error "dsp-job-migration-db did not become ready in time."
+    exit 1
+  fi
+  ok "Migration service stack ready"
+}
+
+ensure_migration_service_if_continuous() {
+  if ! is_continuous_migration_mode; then
+    return 0
+  fi
+  start_migration_service_stack
+}
+
+print_migration_resync_hints() {
+  if ! is_continuous_migration_mode; then
+    return 0
+  fi
+  echo ""
+  echo "Migration execution mode: continuous (external scheduling)"
+  echo "Re-sync from source (one-shot run):"
+  echo "  docker compose --env-file .env --profile migration run --rm -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration"
+  echo "Or inside the running job container:"
+  echo "  docker compose --env-file .env --profile migration exec dsp-job-migration java \$JAVA_OPTS -jar /app/app.jar"
+}
+
 ensure_adopter_config() {
   local example="$ROOT_DIR/config/adopter/adopter-config.yaml.example"
   local active="$ROOT_DIR/config/adopter/adopter-config.yaml"
@@ -847,6 +915,7 @@ prompt_setup_data_mode() {
       SETUP_MODE="real"
       WILL_MIGRATE=true
       INCLUDE_MIGRATION_DB=true
+      prompt_migration_execution_mode
       ;;
     3)
       SETUP_MODE="real"
@@ -858,6 +927,35 @@ prompt_setup_data_mode() {
       ;;
     *)
       error "Invalid choice: '${choice}' — use 1 (demonstration), 2 (real + ETL), 3 (real without migration) or 4 (status)."
+      error "Run './${DSP_ORCHESTRATION_SCRIPT}' again."
+      exit 1
+      ;;
+  esac
+}
+
+# Sets global MIGRATION_EXECUTION_MODE (once|continuous) after option 2 in ./setup.sh.
+prompt_migration_execution_mode() {
+  echo ""
+  echo "How should the migration job run after setup?"
+  echo ""
+  echo "  1) One-time initial migration (recommended for first import)"
+  echo "     Runs the job once during setup; container is removed when finished."
+  echo ""
+  echo "  2) Continuous service (external scheduling)"
+  echo "     Runs the initial migration, then keeps the migration stack available"
+  echo "     in Docker for your operations team to trigger re-syncs."
+  echo ""
+  local choice=""
+  read -r -p "Choice [1/2]: " choice || true
+  case "$choice" in
+    1|"")
+      MIGRATION_EXECUTION_MODE="once"
+      ;;
+    2)
+      MIGRATION_EXECUTION_MODE="continuous"
+      ;;
+    *)
+      error "Invalid choice: '${choice}' — use 1 (one-time) or 2 (continuous service)."
       error "Run './${DSP_ORCHESTRATION_SCRIPT}' again."
       exit 1
       ;;
@@ -1063,6 +1161,10 @@ print_stack_urls() {
       svc_status="$(stack_service_status dsp-job-migration-db)"
       print_stack_url_line "Job migration DB" "$svc_status" "$migration_db_url"
     fi
+    if is_continuous_migration_mode && is_stack_service_up dsp-job-migration; then
+      svc_status="$(stack_service_status dsp-job-migration)"
+      print_stack_url_line "Migration job (service)" "$svc_status" "mode=continuous (idle — trigger re-sync externally)"
+    fi
     return
   fi
 
@@ -1078,6 +1180,9 @@ print_stack_urls() {
   if is_stack_service_up dsp-job-migration-db; then
     echo "Job migration DB:      ${migration_db_url}"
   fi
+  if is_continuous_migration_mode && is_stack_service_up dsp-job-migration; then
+    echo "Migration job:         continuous service (idle — trigger re-sync externally)"
+  fi
 }
 
 print_stack_usage_hints() {
@@ -1088,6 +1193,7 @@ print_stack_usage_hints() {
   echo ""
   echo "Migrate / (re)populate data:"
   echo "  ./setup.sh"
+  print_migration_resync_hints
   echo ""
   echo "Rebuild frontend only: docker compose up -d --build dsp-frontend"
   echo "Logs:       docker compose logs -f"
