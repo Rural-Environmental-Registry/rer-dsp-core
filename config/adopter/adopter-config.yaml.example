@@ -35,7 +35,7 @@ installation:
       placeholder: Enter the identifier
     detail:
       section_title: Search details
-      property_section_title: Record data
+      area_of_interest_section_title: Area of interest data
       registration_date_label: Registration date
       alteration_date_label: Alteration date
       latitude_label: Latitude

@@ -53,7 +53,7 @@ The wizard asks for them in Stage 2. Omit a block to keep the English defaults f
 | `identifier.label` | `screens.home.identifier.label` | Registration ID field label |
 | `identifier.placeholder` | `screens.home.identifier.placeholder` | Registration ID placeholder |
 | `detail.section_title` | `screens.home.detail.sectionTitle` | Detail panel heading |
-| `detail.property_section_title` | `screens.home.detail.propertySectionTitle` | Record data heading |
+| `detail.area_of_interest_section_title` | `screens.home.detail.areaOfInterestSectionTitle` | Area of interest data heading |
 | `detail.registration_date_label` | `screens.home.detail.registrationDateLabel` | Registration date |
 | `detail.alteration_date_label` | `screens.home.detail.alterationDateLabel` | Alteration date |
 | `detail.latitude_label` | `screens.home.detail.latitudeLabel` | Latitude |

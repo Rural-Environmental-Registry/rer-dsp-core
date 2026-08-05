@@ -270,7 +270,7 @@ def apply_screen_text_overrides(
         target = home.setdefault("detail", {})
         for yaml_key, json_key in (
             ("section_title", "sectionTitle"),
-            ("property_section_title", "propertySectionTitle"),
+            ("area_of_interest_section_title", "areaOfInterestSectionTitle"),
             ("registration_date_label", "registrationDateLabel"),
             ("alteration_date_label", "alterationDateLabel"),
             ("latitude_label", "latitudeLabel"),
@@ -320,7 +320,7 @@ def ask_screen_text_fields(screens: dict[str, Any]) -> None:
     detail = screens.setdefault("detail", {})
     detail_fields = (
         ("section_title", "Detail section title", "Search details"),
-        ("property_section_title", "Detail property section title", "Record data"),
+        ("area_of_interest_section_title","Detail area of interest section title","Area of interest data"),
         ("registration_date_label", "Registration date label", "Registration date"),
         ("alteration_date_label", "Alteration date label", "Alteration date"),
         ("latitude_label", "Latitude label", "Latitude"),
