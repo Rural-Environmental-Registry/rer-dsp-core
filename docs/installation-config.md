@@ -24,8 +24,8 @@ The backend does **not** package this JSON in the jar.
 3. `start.sh` validates the generated file and starts the application. Migration remains in `./setup.sh`.
 
 In advanced mode, edit only `config/adopter/adopter-config.yaml` (created from
-`config/adopter/adopter-config.yaml.example`) and run
-`./config.sh --apply`. Do not edit the `key`, `code`, or `primaryCode` keys
+`config/adopter/adopter-config.yaml.example`) and run `./config.sh` (choose
+reapply or edit when prompted). Do not edit the `key`, `code`, or `primaryCode` keys
 directly.
 
 ## Shape

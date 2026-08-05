@@ -48,6 +48,8 @@ services:
   dsp-job-migration-db:
     image: postgres:16
     container_name: dsp-job-migration-db
+    profiles:
+      - migration
     restart: unless-stopped
     ports:
       - "${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}:5432"

@@ -61,7 +61,7 @@ O backend usa `spring.jpa.hibernate.ddl-auto=none` — o DDL fica só no init SQ
 **Importante:** scripts em `/docker-entrypoint-initdb.d` rodam só na **primeira** criação do volume. Após mudar o DDL:
 
 ```bash
-docker compose down -v
+docker compose --env-file .env --profile migration down -v
 ./setup.sh    # remigra / repovoa
 ./start.sh    # sobe as apps
 ```

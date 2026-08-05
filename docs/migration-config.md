@@ -15,10 +15,15 @@ O Docker Compose monta apenas o arquivo ativo em `/config/application.yaml` no c
 
 1. Run `./config.sh` and provide the source database, tables, and columns.
 2. The wizard generates `application.yaml` with protected targets and layer names.
-3. In advanced mode, fill in `config/adopter/adopter-config.yaml` and run `./config.sh --apply`.
-4. Run `./setup.sh`. Migration remains blocked while placeholders exist.
-   Use `--skip-migration` to start only the databases/GeoServer or `--quickstart`
-   for the built-in seed — see [quickstart.md](quickstart.md).
+3. In advanced mode, fill in `config/adopter/adopter-config.yaml` and run `./config.sh`
+   (choose reapply or edit when prompted).
+4. Run `./setup.sh` and choose:
+   - **2** — migrate from JDBC (builds/runs `dsp-job-migration`, starts
+     `dsp-job-migration-db` via Compose profile `migration`)
+   - **3** — real adopter without ETL (empty DBs + GeoServer only)
+   - **1** — demonstration seed (no JDBC) — see [quickstart.md](quickstart.md)
+
+Migration remains blocked while placeholders exist in `application.yaml`.
 
 ## Datasources
 

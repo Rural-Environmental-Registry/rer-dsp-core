@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Configure the adopter without exposing internal DSP file keys.
+# Usage: ./config.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,47 +11,45 @@ APPLY="$ROOT_DIR/scripts/apply_adopter_config.py"
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/common.sh"
 
-usage() {
-  cat <<'EOF'
-Usage: ./config.sh [--apply | --help]
-
-  no option  Start the guided adopter configuration wizard.
-  --apply    Apply the existing config/adopter/adopter-config.yaml file.
-EOF
-}
-
-case "${1:-}" in
-  --help|-h)
-    usage
-    exit 0
-    ;;
-  --apply)
-    if [ ! -f "$CONFIG_FILE" ]; then
-      echo "Configuration file not found: $CONFIG_FILE" >&2
-      echo "Run ./config.sh without options to start the wizard." >&2
-      exit 1
-    fi
-    ;;
-  "")
-    ;;
-  *)
-    usage >&2
-    exit 2
-    ;;
-esac
-
-if [ ! -f "$EXAMPLE_FILE" ]; then
-  echo "Template not found: $EXAMPLE_FILE" >&2
+if [ "$#" -gt 0 ]; then
+  error "Run ./config.sh with no arguments."
   exit 1
 fi
 
-if [ "${1:-}" != "--apply" ]; then
-  if [ -f "$CONFIG_FILE" ]; then
-    if ! prompt_yes_no "Use the existing configuration and reapply it?"; then
-      rm -f "$CONFIG_FILE"
-    fi
-  fi
-  python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE" --wizard
-else
-  python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE"
+if [ ! -f "$EXAMPLE_FILE" ]; then
+  error "Template not found: $EXAMPLE_FILE"
+  exit 1
 fi
+
+if [ -f "$CONFIG_FILE" ]; then
+  echo ""
+  echo "An existing configuration was found:"
+  echo "  $CONFIG_FILE"
+  echo ""
+  echo "What do you want to do?"
+  echo "  1) Reapply the existing configuration (no wizard)"
+  echo "  2) Edit the existing configuration (wizard with current values)"
+  echo "  3) Start over from the template (discards current file)"
+  echo ""
+  choice=""
+  read -r -p "Choice [1/2/3]: " choice || true
+  case "$choice" in
+    1)
+      python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE"
+      exit 0
+      ;;
+    2)
+      python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE" --wizard --edit
+      exit 0
+      ;;
+    3)
+      rm -f "$CONFIG_FILE"
+      ;;
+    *)
+      error "Invalid choice: '${choice}' — use 1 (reapply), 2 (edit), or 3 (start over)."
+      exit 1
+      ;;
+  esac
+fi
+
+python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE" --wizard

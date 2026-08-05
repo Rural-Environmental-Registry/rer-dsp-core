@@ -15,10 +15,6 @@ environment:
     territory_level_2: 4674
     territory_level_3: 4674
     area_of_interest: 4674
-  # Paths to sibling repositories.
-  backend_path: ../rer-dsp-backend
-  frontend_path: ../rer-dsp-frontend
-  job_migration_path: ../rer-dsp-job-data-migration
 
 installation:
   hierarchy:
@@ -74,6 +70,8 @@ map:
     territorial_division: Territorial division
     areas_of_interest: Declared areas of interest
   layers:
+    # Display names are synced from installation.hierarchy (level1–level3) and
+    # installation.kpis.area_of_interest.label when ./config.sh runs.
     level1:
       name: Continent
       active_default: false
@@ -116,7 +114,7 @@ etl:
   #   name_column: nome
   #   geometry_column: geom
   #
-  # After editing SQL here, run: ./config.sh --apply
+  # After editing SQL here, run: ./config.sh
   level1:
     source_table: <source_schema>.<source_table>
     primary_key: <source_pk>

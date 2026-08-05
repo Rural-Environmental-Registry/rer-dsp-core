@@ -39,28 +39,31 @@ Pré-requisitos: Docker 24+ com Compose v2.
 ```bash
 cd rer-dsp-core
 cp .env.example .env
-chmod +x ./setup.sh ./start.sh
+chmod +x ./setup.sh ./start.sh ./config.sh
 ```
 
 Configure o adotante sem editar arquivos internos:
 
 ```bash
-./config.sh          # wizard guiado, recomendado
-./config.sh --apply  # reaplica um adopter-config.yaml existente
+./config.sh          # wizard guiado; menu para reaplicar, editar ou recomeçar
 ```
 
 O wizard gera os arquivos JSON/YAML operacionais. `setup.sh` e `start.sh`
 validam esses arquivos, mas não criam arquivos ativos a partir dos `.example`.
 
 ```bash
-./setup.sh    # bancos + migração ou seed de demo + publish GeoServer
+./setup.sh    # menu: demo / real+ETL / real sem migração / status
 ./start.sh    # sobe a aplicação (não remigra)
 ```
 
-Sem flags, o `./setup.sh` pergunta se você quer setup **real** (JDBC + ETL) ou só **demonstração** (seed Brasil embutido). Atalhos: `./setup.sh --quickstart` (demo) ou `./setup.sh --skip-migration` (bancos vazios, sem seed).
+O `./setup.sh` sempre pergunta como preparar os dados:
 
-UI sem dados migrados da origem: `./setup.sh --skip-migration` e depois `./start.sh`.
-Demo com dados no mapa: `./setup.sh --quickstart` e depois `./start.sh` — ver [docs/quickstart.md](docs/quickstart.md).
+1. **Demonstração** — seed Brasil embutido (sem JDBC; sem banco do job de migração)
+2. **Adotante real + ETL** — migra da fonte JDBC (`./config.sh` antes)
+3. **Adotante real sem migração** — bancos vazios + GeoServer
+4. **Status da stack / limpeza**
+
+Demo com dados no mapa: `./setup.sh` (opção 1) e depois `./start.sh` — ver [docs/quickstart.md](docs/quickstart.md).
 
 Ajuste só no frontend: `docker compose up -d --build dsp-frontend` (não use `down -v`).
 
@@ -85,15 +88,15 @@ docker compose exec dsp-job-migration-db psql -U dsp_job -d dsp-job-migration-db
 Parar / recriar bancos:
 
 ```bash
-docker compose down              # para containers; mantém volumes (dados)
-docker compose down -v           # apaga volumes — depois rode ./setup.sh de novo
+docker compose --env-file .env --profile migration down              # para containers; mantém volumes (dados)
+docker compose --env-file .env --profile migration down -v           # apaga volumes — depois rode ./setup.sh de novo
 ```
 
 ## Configuração
 
 | Caminho | Função |
 | --- | --- |
-| [`.env.example`](.env.example) | Portas, DBs, `DSP_SKIP_MIGRATION` |
+| [`.env.example`](.env.example) | Portas, DBs, caminhos dos repositórios |
 | [`setup.sh`](setup.sh) / [`start.sh`](start.sh) | Setup (dados) vs start (apps) — ver [scripts/README.md](scripts/README.md) |
 | [`config/db/dsp-db/`](config/db/dsp-db/) | Init SQL PostGIS + `dsp.territory_level_*` + `dsp.area_of_interest` |
 | [`config/db/dsp-job-migration-db/`](config/db/dsp-job-migration-db/) | Init SQL `BATCH_*` |

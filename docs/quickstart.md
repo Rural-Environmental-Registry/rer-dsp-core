@@ -6,22 +6,17 @@ Use this when you want to see the DSP UI and map **without** a JDBC source or ET
 
 ```bash
 ./setup.sh
-# Choose: 2) Demonstration only
+# Choose: 1) Demonstration (built-in Brazil seed, no JDBC)
 ./start.sh
 ```
 
-Option **3** in `./setup.sh` (or `./setup.sh --status`) shows whether this project's stack is on, prints the same URLs/hints as `./start.sh`, then lets you remove only this project's containers/volumes/images (`docker compose down -v --rmi all`) or exit.
-
-Non-interactive:
-
-```bash
-./setup.sh --quickstart
-./start.sh
-```
+Option **4** in `./setup.sh` shows whether this project's stack is on, prints the same
+URLs/hints as `./start.sh`, then lets you remove only this project's
+containers/volumes/images (`docker compose --env-file .env --profile migration down -v --rmi all`) or exit.
 
 In demo mode, `./start.sh` does not require
-`config/adopter/adopter-config.yaml`. This file is only used in the flow
-real of the adopter.
+`config/adopter/adopter-config.yaml`. This file is only used in the real
+adopter flow (options 2 and 3).
 
 ## What it does
 
@@ -32,6 +27,8 @@ real of the adopter.
 4. Ensures UI configs: Country / Region / State labels from
    `installation-config.quickstart.json.example` and map layer names from
    `mapLayersConfig.quickstart.json.example`.
+
+Does **not** build the `dsp-job-migration` image or start `dsp-job-migration-db`.
 
 ## Dataset (demo only)
 
@@ -46,9 +43,9 @@ Geometries are heavily simplified, but topologically consistent: neighbouring st
 
 ## Real adopter setup
 
-Choose option **1** in `./setup.sh` (or run without choosing demo) after
-running `./config.sh` to configure the source and generate
-[`application.yaml`](../config/Job-Data-Migration/application/application.yaml).
-See [migration-config.md](migration-config.md).
+1. Run `./config.sh` to configure the source and generate
+   [`application.yaml`](../config/Job-Data-Migration/application/application.yaml).
+2. Run `./setup.sh` and choose **2** (migrate from JDBC) or **3** (empty DBs,
+   UI/GeoServer only).
 
-`./setup.sh --skip-migration` still means empty DBs (no seed) + GeoServer only.
+See [migration-config.md](migration-config.md).

@@ -22,7 +22,8 @@ The backend does **not** require this JSON to be packaged in the jar when runnin
 ## First run (`./config.sh` / `./setup.sh` / `./start.sh`)
 
 1. Run `./config.sh` and provide layer names and colors. WMS URLs are fixed by the core template.
-2. The wizard generates `mapLayersConfig.json`; in advanced mode, use `./config.sh --apply`.
+2. The wizard generates `mapLayersConfig.json`; in advanced mode, edit
+   `adopter-config.yaml` and run `./config.sh` (choose reapply or edit when prompted).
 3. Both scripts **validate** that these four WMS IDs are present (do not rename them):
    - `dsp:territory-level-1`
    - `dsp:territory-level-2`

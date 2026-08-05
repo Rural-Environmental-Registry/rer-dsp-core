@@ -360,6 +360,21 @@ job_enabled_label() {
   fi
 }
 
+# Resolve ${VAR_NAME} using a variable already exported in the shell (.env).
+resolve_env_placeholder() {
+  local raw="$1"
+  if [[ "$raw" =~ ^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$ ]]; then
+    local var_name="${BASH_REMATCH[1]}"
+    if [ -n "${!var_name:-}" ]; then
+      printf '%s' "${!var_name}"
+      return
+    fi
+    printf '%s (unset)' "$raw"
+    return
+  fi
+  printf '%s' "$raw"
+}
+
 print_migration_preview() {
   local cfg="$1"
   local will_run="${2:-false}"
@@ -374,6 +389,8 @@ print_migration_preview() {
   batch_user="$(yaml_scalar "$cfg" "batch" "username")"
   source_url="$(yaml_scalar "$cfg" "source" "url")"
   source_user="$(yaml_scalar "$cfg" "source" "username")"
+  source_url="$(resolve_env_placeholder "$source_url")"
+  source_user="$(resolve_env_placeholder "$source_user")"
   target_url="$(yaml_scalar "$cfg" "target" "url")"
   target_user="$(yaml_scalar "$cfg" "target" "username")"
 
@@ -507,24 +524,17 @@ require_docker() {
   ok "Docker and Docker Compose OK"
 }
 
-# Single source of truth for whether migration should be skipped.
-# Args: $1 = "true"/"false" from the --skip-migration CLI flag (default "false").
-# Reads DSP_SKIP_MIGRATION from the environment (call after ensure_dotenv).
-# Errors out if the legacy DSP_RUN_MIGRATION var is still set, instead of
-# silently honoring it — that triplicity was the source of config drift.
-should_skip_migration() {
-  local cli_flag="${1:-false}"
-
+# Reject legacy env vars that used to control migration on/off.
+# Decision is interactive in ./setup.sh only (call after ensure_dotenv).
+reject_legacy_migration_env() {
   if [ -n "${DSP_RUN_MIGRATION+x}" ]; then
     error "DSP_RUN_MIGRATION is no longer supported."
-    error "Use DSP_SKIP_MIGRATION=true in .env, or ./setup.sh --skip-migration, instead."
+    error "Remove it from .env and choose option 2 or 3 in ./setup.sh."
     exit 1
   fi
-
-  if [ "$cli_flag" = "true" ] || [ "${DSP_SKIP_MIGRATION:-false}" = "true" ]; then
-    echo "true"
-  else
-    echo "false"
+  if [ -n "${DSP_SKIP_MIGRATION+x}" ]; then
+    error "DSP_SKIP_MIGRATION is no longer supported. Remove it from .env and choose option 3 in ./setup.sh if you do not want to migrate."
+    exit 1
   fi
 }
 
@@ -562,7 +572,7 @@ ensure_adopter_config() {
     error "Run ./config.sh to fill in the allowed fields."
     exit 1
   fi
-  if ! python3 "$apply_script" --root "$ROOT_DIR" --config "$active"; then
+  if ! python3 "$apply_script" --root "$ROOT_DIR" --config "$active" --quiet; then
     error "Could not generate the DSP configuration files."
     error "Fix $active or run ./config.sh again."
     exit 1
@@ -573,11 +583,12 @@ ensure_adopter_config() {
 }
 
 start_databases_and_wait() {
-  local include_migration_db="${1:-true}"
+  local include_migration_db="${1:-false}"
 
   if [ "$include_migration_db" = "true" ]; then
     info "Starting databases (dsp-db, dsp-geoserver-exhibition-db, dsp-job-migration-db)..."
-    docker compose --env-file .env up -d dsp-db dsp-geoserver-exhibition-db dsp-job-migration-db
+    docker compose --env-file .env --profile migration up -d \
+      dsp-db dsp-geoserver-exhibition-db dsp-job-migration-db
   else
     info "Starting databases (dsp-db, dsp-geoserver-exhibition-db)..."
     docker compose --env-file .env up -d dsp-db dsp-geoserver-exhibition-db
@@ -629,7 +640,7 @@ get_stack_runtime_services() {
     [ -z "$svc" ] && continue
     [ "$svc" = "dsp-job-migration" ] && continue
     printf '%s\n' "$svc"
-  done < <(docker compose --env-file .env config --services 2>/dev/null || true)
+  done < <(docker compose --env-file .env --profile migration config --services 2>/dev/null || true)
 }
 
 compose_status_label() {
@@ -754,9 +765,11 @@ print_stack_url_line() {
   fi
 }
 
-# Interactive choice when no --quickstart / forced mode is set.
-# Sets the global SETUP_MODE to "demo" or "real".
-# Not a command substitution on purpose: error output must reach the terminal.
+# Tear down compose services, including the migration profile (job DB + migration job).
+compose_down_project() {
+  docker compose --env-file .env --profile migration down "$@"
+}
+
 # Status of this project's compose services + URLs; optional project cleanup; then exit.
 show_stack_status_menu() {
   print_stack_service_status
@@ -773,7 +786,7 @@ show_stack_status_menu() {
   case "$action" in
     1)
       echo ""
-      warn "This deletes ONLY this project's Docker resources (compose down -v --rmi all)."
+      warn "This deletes ONLY this project's Docker resources (compose down -v --rmi all, migration profile included)."
       warn "Database data in project volumes will be lost."
       local confirm=""
       read -r -p "Type YES to confirm cleanup: " confirm || true
@@ -782,7 +795,7 @@ show_stack_status_menu() {
         exit 0
       fi
       info "Removing project containers, volumes and images..."
-      docker compose --env-file .env down -v --rmi all
+      compose_down_project -v --rmi all
       ok "Project Docker resources removed."
       exit 0
       ;;
@@ -797,26 +810,54 @@ show_stack_status_menu() {
   esac
 }
 
-prompt_setup_mode() {
+# Interactive data-prep menu for ./setup.sh.
+# Sets globals: SETUP_MODE (demo|real), WILL_MIGRATE, INCLUDE_MIGRATION_DB.
+# Not a command substitution on purpose: error output must reach the terminal.
+prompt_setup_data_mode() {
+  echo ""
+  echo "This step prepares geographic data in the local DSP databases and publishes GeoServer layers."
+  echo "Pick the option that matches your goal:"
+  echo ""
+  echo "  1) Demonstration (built-in Brazil seed, no JDBC)"
+  echo "     Loads demo map data from built-in SQL — no source database or migration job."
+  echo "     Use when exploring the UI, evaluating the stack, or when you do not have adopter data yet."
+  echo ""
+  echo "  2) Real adopter — migrate from JDBC source (ETL)"
+  echo "     Requires ./config.sh first, then runs ETL from your JDBC source into dsp-db and the GeoServer DB."
+  echo "     Use for a production-like setup when your source database is ready to import."
+  echo ""
+  echo "  3) Real adopter — no migration (empty DBs, UI/GeoServer config only)"
+  echo "     Applies adopter configuration (labels, map layers, SRIDs) but keeps databases empty."
+  echo "     Use when setting up the stack before data is available, or when you will migrate later with option 2."
+  echo ""
+  echo "  4) Stack status / cleanup / exit"
+  echo "     Shows container status and service URLs; optionally removes this project's Docker resources, then exits."
+  echo "     Use to inspect the stack or reset containers/volumes without loading or migrating data."
   echo ""
   echo "How do you want to prepare data?"
-  echo "  1) Real adopter setup (JDBC source + ETL migration)"
-  echo "  2) Demonstration only (built-in Brazil seed, no source DB)"
-  echo "  3) Show stack status / URLs (cleanup or exit)"
   local choice=""
-  read -r -p "Choice [1/2/3]: " choice || true
+  read -r -p "Choice [1/2/3/4]: " choice || true
   case "$choice" in
-    2)
+    1)
       SETUP_MODE="demo"
+      WILL_MIGRATE=false
+      INCLUDE_MIGRATION_DB=false
+      ;;
+    2)
+      SETUP_MODE="real"
+      WILL_MIGRATE=true
+      INCLUDE_MIGRATION_DB=true
       ;;
     3)
+      SETUP_MODE="real"
+      WILL_MIGRATE=false
+      INCLUDE_MIGRATION_DB=false
+      ;;
+    4)
       show_stack_status_menu
       ;;
-    1|"")
-      SETUP_MODE="real"
-      ;;
     *)
-      error "Invalid choice: '${choice}' — use 1 (real), 2 (demonstration) or 3 (status)."
+      error "Invalid choice: '${choice}' — use 1 (demonstration), 2 (real + ETL), 3 (real without migration) or 4 (status)."
       error "Run './${DSP_ORCHESTRATION_SCRIPT}' again."
       exit 1
       ;;
@@ -907,7 +948,7 @@ use_quickstart_layer_srids() {
   done
 
   if [ "$mismatch" = "true" ]; then
-    warn "Quickstart usa SRID 4674; os SRIDs do .env serão usados apenas no fluxo real."
+    warn "Quickstart uses SRID 4674; .env LAYER_SRS_* values apply only in the real adopter flow."
   fi
 
   export LAYER_SRS_TERRITORY_LEVEL_1="EPSG:4674"
@@ -965,7 +1006,7 @@ start_geoserver_exhibition() {
   info "Resolving layer SRS from .env (LAYER_SRS_*)..."
   export_layer_srids_from_migration_config "$migration_config"
   if [ -z "$migration_config" ] || [ ! -f "$migration_config" ]; then
-    info "No migration YAML — using LAYER_SRS_* defaults (quickstart / skip-migration)."
+    info "No migration YAML — using LAYER_SRS_* defaults (demonstration / no migration)."
   fi
 
   info "Building and starting GeoServer Exhibition..."
@@ -999,9 +1040,11 @@ print_stack_urls() {
   local frontend_url="http://${http_host}:${DSP_FRONTEND_HOST_PORT:-22667}${VITE_BASE_URL:-/dsp/}"
   local backend_url="http://${http_host}:${DSP_BACKEND_HOST_PORT:-22666}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
   local svc_status=""
+  local migration_db_url="${http_host}:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
+
+  load_stack_service_statuses
 
   if [ "$show_status" = "with-status" ]; then
-    load_stack_service_statuses
     echo ""
     svc_status="$(stack_service_status dsp-frontend)"
     print_stack_url_line "Frontend" "$svc_status" "$frontend_url"
@@ -1016,8 +1059,10 @@ print_stack_urls() {
     print_stack_url_line "DSP DB" "$svc_status" "${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
     svc_status="$(stack_service_status dsp-geoserver-exhibition-db)"
     print_stack_url_line "GeoServer Exhibition DB" "$svc_status" "${http_host}:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
-    svc_status="$(stack_service_status dsp-job-migration-db)"
-    print_stack_url_line "Job migration DB" "$svc_status" "${http_host}:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
+    if is_stack_service_up dsp-job-migration-db; then
+      svc_status="$(stack_service_status dsp-job-migration-db)"
+      print_stack_url_line "Job migration DB" "$svc_status" "$migration_db_url"
+    fi
     return
   fi
 
@@ -1030,7 +1075,9 @@ print_stack_urls() {
   echo "GeoServer WMS:         ${geoserver_url}/dsp/wms"
   echo "DSP DB:                ${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
   echo "GeoServer Exhibition DB: ${http_host}:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
-  echo "Job migration DB:      ${http_host}:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
+  if is_stack_service_up dsp-job-migration-db; then
+    echo "Job migration DB:      ${migration_db_url}"
+  fi
 }
 
 print_stack_usage_hints() {
@@ -1041,11 +1088,10 @@ print_stack_usage_hints() {
   echo ""
   echo "Migrate / (re)populate data:"
   echo "  ./setup.sh"
-  echo "  ./setup.sh --skip-migration"
   echo ""
   echo "Rebuild frontend only: docker compose up -d --build dsp-frontend"
   echo "Logs:       docker compose logs -f"
-  echo "Stop:       docker compose down"
-  echo "Reset DBs:  docker compose down -v && ./setup.sh"
+  echo "Stop:       docker compose --env-file .env --profile migration down"
+  echo "Reset DBs:  docker compose --env-file .env --profile migration down -v && ./setup.sh"
   echo ""
 }

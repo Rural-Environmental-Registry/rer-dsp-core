@@ -44,6 +44,20 @@ def dump_yaml(data: Any) -> str:
     )
 
 
+def read_dotenv_value(env_file: Path, key: str, default: str = "") -> str:
+    if not env_file.is_file():
+        return default
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" in stripped:
+            env_key, _, value = stripped.partition("=")
+            if env_key == key:
+                return value
+    return default
+
+
 def get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     value: Any = data
     for key in keys:
@@ -51,6 +65,21 @@ def get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
             return default
         value = value.get(key, default)
     return value
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Fill missing keys from base without overwriting override values."""
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if (
+            key in merged
+            and isinstance(merged[key], dict)
+            and isinstance(value, dict)
+        ):
+            merged[key] = deep_merge(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
 
 
 def ask(label: str, default: Any = "") -> Any:
@@ -72,6 +101,57 @@ def ask_field(label: str, default: Any, description: str, used_in: str) -> Any:
     return ask("  Value", default)
 
 
+def ask_int_field(
+    label: str,
+    default: Any,
+    description: str,
+    used_in: str,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    while True:
+        print(f"\n  {label}")
+        print(f"  What: {description}")
+        print(f"  Used in: {used_in}")
+        raw = ask("  Value", default)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            print("\n  Enter a whole number.")
+            continue
+        if minimum is not None and value < minimum:
+            print(f"\n  Enter a value greater than or equal to {minimum}.")
+            continue
+        if maximum is not None and value > maximum:
+            print(f"\n  Enter a value less than or equal to {maximum}.")
+            continue
+        return value
+
+
+def ask_color_field(
+    label: str,
+    default: Any,
+    description: str,
+    used_in: str,
+    *,
+    allow_transparent: bool = False,
+) -> str:
+    while True:
+        print(f"\n  {label}")
+        print(f"  What: {description}")
+        print(f"  Used in: {used_in}")
+        raw = str(ask("  Value", default)).strip()
+        if allow_transparent and raw == "transparent":
+            return raw
+        if HEX_COLOR.fullmatch(raw):
+            return raw
+        if allow_transparent:
+            print("\n  Enter a #RGB or #RRGGBB value, or 'transparent'.")
+        else:
+            print("\n  Enter a #RGB or #RRGGBB value.")
+
+
 def ask_bool_field(label: str, default: bool, description: str, used_in: str) -> bool:
     print(f"\n  {label}")
     print(f"  What: {description}")
@@ -85,7 +165,7 @@ def etl_field_help(field: str) -> str:
             "Source table name (schema.table) for this wizard. "
             "SQL subqueries are also supported, but only by editing "
             "./config/adopter/adopter-config.yaml (advanced mode), then running "
-            "./config.sh --apply — do not type SQL here."
+            "./config.sh — do not type SQL here."
         ),
         "primary_key": "Unique source column used to identify each record.",
         "parent_key": "Source column linking this record to its parent territory.",
@@ -103,26 +183,116 @@ def etl_field_help(field: str) -> str:
     return descriptions.get(field, "Source value used by the ETL mapping.")
 
 
-def wizard(example: Path, active: Path) -> bool:
-    config = yaml.safe_load(example.read_text(encoding="utf-8"))
-    print("Guided adopter configuration")
-    print("Each stage explains the field and where its value is used.")
-    print("Values between brackets are default/example values.")
-    print("Press Enter to accept the displayed default/example value.")
-    print("\n" + "=" * 72)
-    print("Setup mode")
-    print("=" * 72)
-    print("  1) Real adopter setup with source data migration")
-    print("  2) Quickstart demonstration without source data")
-    setup_mode = input("Choose setup mode: ").strip() or "1"
-    if setup_mode == "2":
-        print("\nQuickstart selected.")
-        print("No migration fields are required.")
-        print("Run: ./setup.sh --quickstart")
-        print("Then run: ./start.sh")
-        return False
-    if setup_mode != "1":
-        raise ValueError("Choose 1 for real setup or 2 for quickstart.")
+def reset_disabled_themes(
+    config: dict[str, Any],
+    template: dict[str, Any],
+    theme_count: int,
+) -> bool:
+    """Restore template defaults for themes above theme_count and clear ETL columns."""
+    changed = False
+    kpis = config["installation"]["kpis"]
+    template_kpis = template["installation"]["kpis"]
+    for index in range(1, 5):
+        code = f"theme_{index}"
+        if index > theme_count:
+            restored = copy.deepcopy(template_kpis[code])
+            restored["enabled"] = False
+            if kpis.get(code) != restored:
+                changed = True
+            kpis[code] = restored
+        elif not kpis.get(code, {}).get("enabled", True):
+            kpis[code]["enabled"] = True
+            changed = True
+
+    aoi = config["etl"]["area_of_interest"]
+    for index in range(1, 5):
+        key = f"theme_{index}_column"
+        if index > theme_count and aoi.get(key) is not None:
+            aoi[key] = None
+            changed = True
+    return changed
+
+
+def enabled_kpi_codes(theme_count: int) -> tuple[str, ...]:
+    return ("area_of_interest",) + tuple(f"theme_{index}" for index in range(1, theme_count + 1))
+
+
+def ask_kpi_accent_colors(config: dict[str, Any], theme_count: int) -> None:
+    print("\n  KPI card colors")
+    print("  What: Highlight color shown on each KPI card in the dashboard.")
+    print("  Used in: the application dashboard")
+    kpis = config["installation"]["kpis"]
+    for code in enabled_kpi_codes(theme_count):
+        card = kpis[code]
+        card["accent_color"] = ask_color_field(
+            f"Accent color for {code}", card["accent_color"],
+            "Highlight color for the KPI card.",
+            "the application dashboard",
+        )
+
+
+def sync_map_layer_names(config: dict[str, Any]) -> bool:
+    """Keep territorial layer display names aligned with hierarchy and AOI KPI labels."""
+    changed = False
+    hierarchy = config["installation"]["hierarchy"]
+    layers = config["map"]["layers"]
+    for level in ("level1", "level2", "level3"):
+        label = hierarchy[level]["label"]
+        if layers[level].get("name") != label:
+            layers[level]["name"] = label
+            changed = True
+    aoi_name = config["installation"]["kpis"]["area_of_interest"]["label"]
+    if layers["area_of_interest"].get("name") != aoi_name:
+        layers["area_of_interest"]["name"] = aoi_name
+        changed = True
+    return changed
+
+
+def ask_data_preparation_flow() -> bool:
+    print("\nBefore configuring a JDBC source, choose the data preparation flow:")
+    print("  1. Quickstart — demonstration data, no JDBC source or migration job")
+    print("  2. Empty databases — real adopter setup without running the migration job")
+    print("  3. Real adopter — configure a JDBC source and continue this wizard")
+
+    while True:
+        choice = ask("Choice", "3")
+        if choice == "3":
+            return True
+        if choice == "1":
+            if ask_bool("Use the Quickstart flow instead", True):
+                print("\nRun ./setup.sh and choose option 1 (Demonstration).")
+                print("This wizard will now exit without configuring a JDBC source.")
+                return False
+        elif choice == "2":
+            if ask_bool("Use the empty-database flow instead", True):
+                print("\nRun ./setup.sh and choose option 3 (Real adopter — no migration).")
+                print("This wizard will now exit without configuring a JDBC source.")
+                return False
+        else:
+            print("Invalid choice. Enter 1, 2, or 3.")
+
+
+def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
+    print()
+    template = yaml.safe_load(example.read_text(encoding="utf-8"))
+    if edit:
+        if not active.is_file():
+            print(f"Error: file not found: {active}", file=sys.stderr)
+            raise SystemExit(1)
+        saved = yaml.safe_load(active.read_text(encoding="utf-8"))
+        config = deep_merge(template, saved)
+        print("Edit adopter configuration")
+        print("Each stage explains the field and where its value is used.")
+        print("Values between brackets are the current saved values.")
+        print("Press Enter to keep the displayed value.")
+    else:
+        config = copy.deepcopy(template)
+        print("Guided adopter configuration")
+        print("Each stage explains the field and where its value is used.")
+        print("Values between brackets are default/example values.")
+        print("Press Enter to accept the displayed default/example value.")
+        if not ask_data_preparation_flow():
+            return False
 
     print("\n" + "=" * 72)
     print("Stage 1/5 — Source database and spatial reference")
@@ -149,11 +319,12 @@ def wizard(example: Path, active: Path) -> bool:
         ("territory_level_3", "Territorial level 3 SRID"),
         ("area_of_interest", "Area of interest SRID"),
     ):
-        env["layer_srs"][key] = int(ask_field(
+        env["layer_srs"][key] = ask_int_field(
             label, env["layer_srs"][key],
             "Coordinate reference system identifier of the source geometry.",
             "ETL geometry conversion and GeoServer layers",
-        ))
+            minimum=1,
+        )
 
     print("\n" + "=" * 72)
     print("Stage 2/5 — Application text and KPI selection")
@@ -179,21 +350,19 @@ def wizard(example: Path, active: Path) -> bool:
         "Downloads screen title", screens["downloads_title"],
         "Title displayed above the public downloads screen.", "the downloads screen",
     )
-    theme_count = int(ask_field(
-        "Number of theme KPIs (0-4)", 4,
+    theme_count = ask_int_field(
+        "Number of theme KPIs (0-4)", config["installation"]["kpis"]["theme_count"],
         "Number of optional theme measurements available in the source data.",
         "generated KPI cards and ETL theme mappings",
-    ))
-    if theme_count < 0 or theme_count > 4:
-        raise ValueError("The number of theme KPIs must be between 0 and 4.")
+        minimum=0,
+        maximum=4,
+    )
     config["installation"]["kpis"]["theme_count"] = theme_count
+    reset_disabled_themes(config, template, theme_count)
     for code in ("area_of_interest", "theme_1", "theme_2", "theme_3", "theme_4"):
         card = config["installation"]["kpis"][code]
-        if code != "area_of_interest":
-            theme_number = int(code.split("_")[1])
-            card["enabled"] = theme_number <= theme_count
-            if not card["enabled"]:
-                continue
+        if code != "area_of_interest" and not card["enabled"]:
+            continue
         card["label"] = ask_field(
             f"KPI label for {code}", card["label"],
             "Human-readable name shown on the KPI card.", "the application dashboard",
@@ -202,15 +371,56 @@ def wizard(example: Path, active: Path) -> bool:
             f"KPI unit for {code}", card["unit_of_measurement"],
             "Unit displayed beside the KPI value.", "the application dashboard",
         )
+        if code == "area_of_interest":
+            card["optional_label"] = ask_field(
+                "KPI optional label for area_of_interest", card["optional_label"],
+                "Secondary unit shown for the area sum (e.g. ha).",
+                "the AREA_OF_INTEREST KPI card",
+            )
+    area = config["installation"]["area"]
+    area["unit"] = ask_field(
+        "Area unit code", area["unit"],
+        "Short code for the area measurement (e.g. ha, m²).",
+        "area labels and KPI subtotals",
+    )
+    area["unit_label"] = ask_field(
+        "Area unit label", area["unit_label"],
+        "Label shown beside area values in the UI.",
+        "detail screens and downloads",
+    )
+    formats = config["installation"]["formats"]
+    formats["date"] = ask_field(
+        "Date format", formats["date"],
+        "Pattern for dates without time (Java-style, e.g. dd/MM/yyyy).",
+        "lists and detail screens",
+    )
+    formats["date_time"] = ask_field(
+        "Date-time format", formats["date_time"],
+        "Pattern for dates with time (e.g. dd/MM/yyyy HH:mm).",
+        "detail screens",
+    )
 
     print("\n" + "=" * 72)
-    print("Stage 3/5 — Map layers")
+    print("Stage 3/5 — KPI colors and map layers")
     print("=" * 72)
+    ask_kpi_accent_colors(config, theme_count)
+    group_names = config["map"]["group_names"]
+    group_names["territorial_division"] = ask_field(
+        "Map group name — territorial division", group_names["territorial_division"],
+        "Title of the territorial hierarchy layer group in the map.",
+        "the map layer selector",
+    )
+    group_names["areas_of_interest"] = ask_field(
+        "Map group name — areas of interest", group_names["areas_of_interest"],
+        "Title of the declared areas layer group in the map.",
+        "the map layer selector",
+    )
+    sync_map_layer_names(config)
     for layer_name, layer in config["map"]["layers"].items():
-        layer["name"] = ask_field(
-            f"Layer name for {layer_name}", layer["name"],
-            "Name shown to users in the map layer list.", "the map layer selector",
-        )
+        print(f"\n  Layer name for {layer_name}")
+        print("  What: Same display name defined in the previous stage.")
+        print("  Used in: the map layer selector")
+        print(f"  Value: {layer['name']}")
         print(f"\n  WMS URL for {layer_name}")
         print("  What: Fixed GeoServer WMS endpoint serving this layer.")
         print("  Used in: the map client and GeoServer requests")
@@ -220,15 +430,16 @@ def wizard(example: Path, active: Path) -> bool:
             "Whether the layer starts enabled when the map opens.",
             "the initial map state",
         )
-        layer["color"] = ask_field(
+        layer["color"] = ask_color_field(
             f"Stroke color for {layer_name}", layer["color"],
             "Line color used to draw the layer boundary.",
             "the map and generated GeoServer style",
         )
-        layer["fill_color"] = ask_field(
+        layer["fill_color"] = ask_color_field(
             f"Fill color for {layer_name}", layer["fill_color"],
             "Fill color used inside the layer; use transparent when needed.",
             "the map and generated GeoServer style",
+            allow_transparent=True,
         )
 
     print("\n" + "=" * 72)
@@ -307,9 +518,6 @@ def replace_env(env_file: Path, values: dict[str, Any]) -> None:
         "DSP_SOURCE_JDBC_URL": get(values, "environment", "source_jdbc_url"),
         "DSP_SOURCE_DB_USER": get(values, "environment", "source_db_user"),
         "DSP_SOURCE_DB_PASSWORD": get(values, "environment", "source_db_password"),
-        "DSP_BACKEND_PATH": get(values, "environment", "backend_path"),
-        "DSP_FRONTEND_PATH": get(values, "environment", "frontend_path"),
-        "DSP_JOB_MIGRATION_PATH": get(values, "environment", "job_migration_path"),
     }
     srs = get(values, "environment", "layer_srs", default={})
     for name, value in srs.items():
@@ -362,11 +570,38 @@ def set_source_mapping(section: dict[str, Any], values: dict[str, Any]) -> None:
             mapping[source] = mapping.pop(placeholder)
 
 
-def apply_config(root: Path, active: Path) -> None:
+def validate_job_migration_path(root: Path) -> None:
+    raw = read_dotenv_value(
+        root / ".env",
+        "DSP_JOB_MIGRATION_PATH",
+        default="../rer-dsp-job-data-migration",
+    )
+    path = Path(str(raw))
+    if not path.is_absolute():
+        path = (root / path).resolve()
+    else:
+        path = path.resolve()
+    dockerfile = path / "Dockerfile"
+    if not dockerfile.is_file():
+        raise ValueError(
+            f"Migration job repository not found at: {path} "
+            f"(expected Dockerfile). Clone rer-dsp-job-data-migration "
+            f"or set DSP_JOB_MIGRATION_PATH in .env."
+        )
+
+
+def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
+    example = root / "config/adopter/adopter-config.yaml.example"
+    template = yaml.safe_load(example.read_text(encoding="utf-8"))
     values = yaml.safe_load(active.read_text(encoding="utf-8"))
+    validate_job_migration_path(root)
     theme_count = get(values, "installation", "kpis", "theme_count", default=4)
     if not isinstance(theme_count, int) or theme_count < 0 or theme_count > 4:
         raise ValueError("theme_count must be an integer between 0 and 4.")
+    config_changed = reset_disabled_themes(values, template, theme_count)
+    config_changed = sync_map_layer_names(values) or config_changed
+    if config_changed:
+        active.write_text(dump_yaml(values), encoding="utf-8")
     source_values = []
     for entity in ("level1", "level2", "level3", "area_of_interest"):
         entity_values = get(values, "etl", entity, default={})
@@ -401,6 +636,13 @@ def apply_config(root: Path, active: Path) -> None:
         ):
             raise ValueError(
                 f"map.layers.{layer_name}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
+            )
+    kpis = get(values, "installation", "kpis", default={})
+    for code in enabled_kpi_codes(theme_count):
+        accent_color = get(kpis, code, "accent_color")
+        if not isinstance(accent_color, str) or not HEX_COLOR.fullmatch(accent_color):
+            raise ValueError(
+                f"installation.kpis.{code}.accent_color must be a #RGB or #RRGGBB value."
             )
     if any(
         "\n" in str(get(values, "etl", entity, "source_table", default=""))
@@ -438,10 +680,12 @@ def apply_config(root: Path, active: Path) -> None:
             ("label", "label"),
             ("unit_of_measurement", "unitOfMeasurement"),
             ("optional_label", "optionalLabel"),
-            ("accent_color", "accentColor"),
         ):
             if source in override:
                 card[target] = override[source]
+        accent_color = override.get("accent_color")
+        if isinstance(accent_color, str) and HEX_COLOR.fullmatch(accent_color):
+            card["accentColor"] = accent_color
         configured_cards.append(card)
     installation["kpis"]["cards"] = configured_cards
     area = get(values, "installation", "area", default={})
@@ -550,14 +794,15 @@ def apply_config(root: Path, active: Path) -> None:
     output = root / "config/Job-Data-Migration/application/application.yaml"
     output.write_text(dump_yaml(migration), encoding="utf-8")
     replace_env(root / ".env", values)
-    print("Configuration files generated successfully.")
-    print("\nNext steps:")
-    print(f"  1. Review: {active}")
-    print(
-        "  2. For SQL subqueries, keep source_table in a YAML folded block (>-)"
-    )
-    print("  3. Run ./setup.sh to migrate data and publish GeoServer layers.")
-    print("  4. Run ./start.sh to start the application.")
+    if not quiet:
+        print("Configuration files generated successfully.")
+        print("\nNext steps:")
+        print(f"  1. Review: {active}")
+        print(
+            "  2. For SQL subqueries, keep source_table in a YAML folded block (>-)"
+        )
+        print("  3. Run ./setup.sh and choose option 2 (migrate) or 3 (no migration).")
+        print("  4. Run ./start.sh to start the application.")
 
 
 def main() -> None:
@@ -565,17 +810,35 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--wizard", action="store_true")
+    parser.add_argument(
+        "--edit",
+        action="store_true",
+        help="Edit an existing configuration (use with --wizard).",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress success message and next steps (used by setup.sh).",
+    )
     args = parser.parse_args()
     example = args.root / "config/adopter/adopter-config.yaml.example"
     active = args.config or args.root / "config/adopter/adopter-config.yaml"
-    if args.wizard and not wizard(example, active):
-        return
+    if args.edit and not args.wizard:
+        print("Error: --edit requires --wizard.", file=sys.stderr)
+        raise SystemExit(1)
+    if args.wizard:
+        try:
+            if not wizard(example, active, edit=args.edit):
+                return
+        except ValueError as error:
+            print(f"\nConfiguration error: {error}", file=sys.stderr)
+            raise SystemExit(1)
     if not active.exists():
         print(f"Error: file not found: {active}", file=sys.stderr)
         print("Run ./config.sh to start the guided configuration.", file=sys.stderr)
         raise SystemExit(1)
     try:
-        apply_config(args.root, active)
+        apply_config(args.root, active, quiet=args.quiet)
     except (KeyError, TypeError, ValueError) as error:
         print(f"Adopter configuration error: {error}", file=sys.stderr)
         raise SystemExit(1)

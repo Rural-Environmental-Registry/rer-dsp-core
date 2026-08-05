@@ -17,6 +17,7 @@ require_docker
 
 step_header 2 "Environment (.env)"
 ensure_dotenv
+reject_legacy_migration_env
 
 step_header 3 "Repository paths (backend / frontend)"
 
@@ -75,7 +76,7 @@ fi
 
 step_header 7 "Databases (reuse volumes — no migration)"
 
-start_databases_and_wait
+start_databases_and_wait "false"
 info "Migration is not run by ./start.sh. Use ./setup.sh when you need to (re)migrate."
 
 step_header 8 "GeoServer Exhibition + application containers"

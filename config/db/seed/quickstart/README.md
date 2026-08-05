@@ -31,6 +31,6 @@ Static SQL that populates `dsp-db` and `dsp-geoserver-exhibition-db` without a J
 
 ## Usage
 
-Applied by `./setup.sh` when you choose demonstration mode (or `./setup.sh --quickstart`).
+Applied by `./setup.sh` when you choose option **1** (demonstration).
 
 Do **not** use these files for production or as a real adopter mapping.
