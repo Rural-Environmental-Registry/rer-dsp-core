@@ -30,6 +30,25 @@ installation:
   screens:
     home_title: Browse registered data
     downloads_title: Download public data
+    identifier:
+      label: Identifier
+      placeholder: Enter the identifier
+    detail:
+      section_title: Search details
+      property_section_title: Record data
+      registration_date_label: Registration date
+      alteration_date_label: Alteration date
+      latitude_label: Latitude
+      longitude_label: Longitude
+      area_label: Area
+      features_download_label: Download features
+    downloads:
+      theme:
+        label: Theme
+        placeholder: All themes
+      level1_section_title: Select the continent you want to access for Downloads
+      level2_section_title: Options for the selected continent
+      filter_by_title: "Filter by:"
   kpis:
     # Number of theme KPIs available in the source database (0 to 4).
     theme_count: 4

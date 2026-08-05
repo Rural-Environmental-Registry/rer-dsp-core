@@ -248,6 +248,130 @@ def sync_map_layer_names(config: dict[str, Any]) -> bool:
     return changed
 
 
+def apply_screen_text_overrides(
+    installation: dict[str, Any],
+    screens_yaml: dict[str, Any],
+) -> None:
+    """Apply localized screen labels from adopter-config to installation-config."""
+    home = installation["screens"]["home"]
+    downloads = installation["screens"]["downloads"]
+
+    identifier = screens_yaml.get("identifier")
+    if isinstance(identifier, dict):
+        target = home.get("identifier")
+        if isinstance(target, dict):
+            if "label" in identifier:
+                target["label"] = identifier["label"]
+            if "placeholder" in identifier:
+                target["placeholder"] = identifier["placeholder"]
+
+    detail = screens_yaml.get("detail")
+    if isinstance(detail, dict):
+        target = home.setdefault("detail", {})
+        for yaml_key, json_key in (
+            ("section_title", "sectionTitle"),
+            ("property_section_title", "propertySectionTitle"),
+            ("registration_date_label", "registrationDateLabel"),
+            ("alteration_date_label", "alterationDateLabel"),
+            ("latitude_label", "latitudeLabel"),
+            ("longitude_label", "longitudeLabel"),
+            ("area_label", "areaLabel"),
+            ("features_download_label", "featuresDownloadLabel"),
+        ):
+            if yaml_key in detail:
+                target[json_key] = detail[yaml_key]
+
+    downloads_yaml = screens_yaml.get("downloads")
+    if isinstance(downloads_yaml, dict):
+        theme = downloads_yaml.get("theme")
+        if isinstance(theme, dict):
+            target = downloads.get("theme")
+            if isinstance(target, dict):
+                if "label" in theme:
+                    target["label"] = theme["label"]
+                if "placeholder" in theme:
+                    target["placeholder"] = theme["placeholder"]
+        for yaml_key, json_key in (
+            ("level1_section_title", "level1SectionTitle"),
+            ("level2_section_title", "level2SectionTitle"),
+            ("filter_by_title", "filterByTitle"),
+        ):
+            if yaml_key in downloads_yaml:
+                downloads[json_key] = downloads_yaml[yaml_key]
+
+
+def ask_screen_text_fields(screens: dict[str, Any]) -> None:
+    """Collect localized home and downloads screen labels in the wizard."""
+    identifier = screens.setdefault("identifier", {})
+    identifier["label"] = ask_field(
+        "Home identifier label", identifier.get("label", "Identifier"),
+        "Label for the registration ID search field on the home screen.",
+        "the home screen search form",
+    )
+    identifier["placeholder"] = ask_field(
+        "Home identifier placeholder", identifier.get("placeholder", "Enter the identifier"),
+        "Placeholder shown inside the registration ID search field.",
+        "the home screen search form",
+    )
+
+    print("\n  Home detail labels")
+    print("  What: Text shown on the registration detail panel after a search.")
+    print("  Used in: the home screen detail panel")
+    detail = screens.setdefault("detail", {})
+    detail_fields = (
+        ("section_title", "Detail section title", "Search details"),
+        ("property_section_title", "Detail property section title", "Record data"),
+        ("registration_date_label", "Registration date label", "Registration date"),
+        ("alteration_date_label", "Alteration date label", "Alteration date"),
+        ("latitude_label", "Latitude label", "Latitude"),
+        ("longitude_label", "Longitude label", "Longitude"),
+        ("area_label", "Area label", "Area"),
+        ("features_download_label", "Features download label", "Download features"),
+    )
+    for key, label, default in detail_fields:
+        detail[key] = ask_field(
+            label, detail.get(key, default),
+            f"Label for '{default}' on the registration detail panel.",
+            "the home screen detail panel",
+        )
+
+    print("\n  Downloads screen labels")
+    print("  What: Text shown on filters and section headers in the downloads screen.")
+    print("  Used in: the downloads screen")
+    downloads = screens.setdefault("downloads", {})
+    theme = downloads.setdefault("theme", {})
+    theme["label"] = ask_field(
+        "Downloads theme label", theme.get("label", "Theme"),
+        "Label for the theme filter on the downloads screen.",
+        "the downloads screen",
+    )
+    theme["placeholder"] = ask_field(
+        "Downloads theme placeholder", theme.get("placeholder", "All themes"),
+        "Placeholder for the theme filter on the downloads screen.",
+        "the downloads screen",
+    )
+    downloads["level1_section_title"] = ask_field(
+        "Downloads level 1 section title",
+        downloads.get(
+            "level1_section_title",
+            "Select the continent you want to access for Downloads",
+        ),
+        "Introductory text for territorial level 1 on the downloads screen.",
+        "the downloads screen",
+    )
+    downloads["level2_section_title"] = ask_field(
+        "Downloads level 2 section title",
+        downloads.get("level2_section_title", "Options for the selected continent"),
+        "Introductory text for territorial level 2 on the downloads screen.",
+        "the downloads screen",
+    )
+    downloads["filter_by_title"] = ask_field(
+        "Downloads filter-by title", downloads.get("filter_by_title", "Filter by:"),
+        "Prefix shown before download filters.",
+        "the downloads screen",
+    )
+
+
 def ask_data_preparation_flow() -> bool:
     print("\nBefore configuring a JDBC source, choose the data preparation flow:")
     print("  1. Quickstart — demonstration data, no JDBC source or migration job")
@@ -350,6 +474,7 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         "Downloads screen title", screens["downloads_title"],
         "Title displayed above the public downloads screen.", "the downloads screen",
     )
+    ask_screen_text_fields(screens)
     theme_count = ask_int_field(
         "Number of theme KPIs (0-4)", config["installation"]["kpis"]["theme_count"],
         "Number of optional theme measurements available in the source data.",
@@ -666,6 +791,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     installation["screens"]["downloads"]["title"] = screens.get(
         "downloads_title", installation["screens"]["downloads"]["title"]
     )
+    apply_screen_text_overrides(installation, screens)
     cards = get(values, "installation", "kpis", default={})
     configured_cards = []
     for card in installation["kpis"]["cards"]:

@@ -34,10 +34,40 @@ directly.
 | --- | --- |
 | `hierarchy` | Levels `level1`…`level3` (labels/placeholders) |
 | `screens.home` | 2 levels (`level2`, `level3`) + identifier + `detail` |
-| `screens.downloads` | 3 levels + theme |
+| `screens.downloads` | 3 levels + theme + section titles |
 | `kpis` | Up to 5 cards; `primaryCode` = **`AREA_OF_INTEREST`**; optional `THEME_1`…`THEME_4` |
 | `areaOfInterest` | Unit of area (`areaUnit` / `areaUnitLabel`) |
 | `formats` | `date` / `dateTime` patterns for the UI |
+
+### Localizable texts (`adopter-config.yaml`)
+
+Configure these under `installation.screens` in
+[`config/adopter/adopter-config.yaml.example`](../config/adopter/adopter-config.yaml.example).
+The wizard asks for them in Stage 2. Omit a block to keep the English defaults from
+`installation-config.json.example`.
+
+| Adopter key | JSON target | UI use |
+| --- | --- | --- |
+| `home_title` | `screens.home.title` | Home screen heading |
+| `downloads_title` | `screens.downloads.title` | Downloads screen heading |
+| `identifier.label` | `screens.home.identifier.label` | Registration ID field label |
+| `identifier.placeholder` | `screens.home.identifier.placeholder` | Registration ID placeholder |
+| `detail.section_title` | `screens.home.detail.sectionTitle` | Detail panel heading |
+| `detail.property_section_title` | `screens.home.detail.propertySectionTitle` | Record data heading |
+| `detail.registration_date_label` | `screens.home.detail.registrationDateLabel` | Registration date |
+| `detail.alteration_date_label` | `screens.home.detail.alterationDateLabel` | Alteration date |
+| `detail.latitude_label` | `screens.home.detail.latitudeLabel` | Latitude |
+| `detail.longitude_label` | `screens.home.detail.longitudeLabel` | Longitude |
+| `detail.area_label` | `screens.home.detail.areaLabel` | Area |
+| `detail.features_download_label` | `screens.home.detail.featuresDownloadLabel` | Features download action |
+| `downloads.theme.label` | `screens.downloads.theme.label` | Theme filter label |
+| `downloads.theme.placeholder` | `screens.downloads.theme.placeholder` | Theme filter placeholder |
+| `downloads.level1_section_title` | `screens.downloads.level1SectionTitle` | Downloads level 1 intro |
+| `downloads.level2_section_title` | `screens.downloads.level2SectionTitle` | Downloads level 2 intro |
+| `downloads.filter_by_title` | `screens.downloads.filterByTitle` | Downloads filter prefix |
+
+Protected contract keys (do not change via adopter config): `hierarchyKeys`,
+`identifier.key`, `theme.key`, `primaryCode`, KPI `code` values.
 
 ### KPI codes (stable) vs labels (local)
 
@@ -60,7 +90,7 @@ the generated KPI configuration and the ETL mapping.
 ## Adopter changes
 
 1. Run `./config.sh` to generate the active installation configuration.
-2. Configure hierarchy, KPI labels, formats, and area through the wizard or `adopter-config.yaml`.
+2. Configure hierarchy, KPI labels, screen texts, formats, and area through the wizard or `adopter-config.yaml`.
 3. Keep `AREA_OF_INTEREST` as `primaryCode` unless the product contract changes.
 4. Map theme source columns through the migration configuration — see [migration-config.md](migration-config.md).
 5. Restart the backend after configuration changes (the config is cached at startup).

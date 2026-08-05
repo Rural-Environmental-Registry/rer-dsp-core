@@ -131,7 +131,11 @@ screens = data.get("screens", {})
 home = screens.get("home", {})
 downloads = screens.get("downloads", {})
 print(f"  Home screen: {home.get('title', '<missing>')}")
+identifier = home.get("identifier") or {}
+print(f"  Home identifier: {identifier.get('label', '<missing>')}")
 print(f"  Downloads screen: {downloads.get('title', '<missing>')}")
+theme = downloads.get("theme") or {}
+print(f"  Downloads theme: {theme.get('label', '<missing>')}")
 
 kpis = data.get("kpis", {})
 cards = kpis.get("cards", [])
