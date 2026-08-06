@@ -681,10 +681,22 @@ def ask_generic_layer_entry(
     )
 
     group_names = config["map"]["group_names"]
+    existing_keys = sorted(group_names)
+    default_group_key = entry.get("group_key") or (existing_keys[0] if existing_keys else "thematic")
+    keys_list = ", ".join(existing_keys) if existing_keys else "(none yet)"
+    group_key_help = (
+        "Stable group id. Enter an existing key to add this layer to that group, "
+        "or type a new key to create a group (you will be asked for its display name next). "
+        f"Existing keys: {keys_list}."
+    )
+    if existing_keys:
+        print(
+            f"\n  Example: reuse `{existing_keys[0]}` or create `environmental_layers`."
+        )
     group_key = str(
         ask_field(
-            "Map group key", entry.get("group_key", "thematic"),
-            f"Group holding this layer. Existing keys: {', '.join(sorted(group_names))}.",
+            "Map group key", default_group_key,
+            group_key_help,
             "the map layer selector",
         )
     ).strip()
@@ -692,7 +704,7 @@ def ask_generic_layer_entry(
     if group_key not in group_names:
         group_names[group_key] = ask_field(
             f"Map group name — {group_key}", group_key.replace("_", " ").capitalize(),
-            "Title of this layer group in the map.",
+            "Display title for the new group (only asked when the key is new).",
             "the map layer selector",
         )
 

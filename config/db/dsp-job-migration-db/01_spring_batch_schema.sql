@@ -1,4 +1,9 @@
 -- Spring Batch 5.2.x schema (PostgreSQL). Job uses spring.batch.jdbc.initialize-schema=never.
+--
+-- NOTE: A copy of this file also lives in rer-dsp-job-data-migration at
+-- src/main/resources/db/batch_metadata/01_spring_batch_schema.sql (used for
+-- standalone execution of the job). Both copies must be kept in sync — edit
+-- and commit changes to this schema in BOTH repositories.
 
 CREATE TABLE IF NOT EXISTS BATCH_JOB_INSTANCE (
     JOB_INSTANCE_ID BIGINT NOT NULL PRIMARY KEY,
