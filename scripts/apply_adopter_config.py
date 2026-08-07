@@ -1281,7 +1281,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     aoi_mapping = aoi.get("column-mapping", {})
     for placeholder, source, target in (
         ("<source_pk>", aoi_values["primary_key"], "id"),
-        ("<source_geom>", aoi_values["geometry_column"], "geometry"),
+        ("<source_geom>", aoi_values["geometry_column"], "geom"),
     ):
         if placeholder in aoi_mapping:
             aoi_mapping[source] = aoi_mapping.pop(placeholder)

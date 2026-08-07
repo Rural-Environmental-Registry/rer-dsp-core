@@ -7,7 +7,7 @@ Static SQL that populates `dsp-db` and `dsp-geoserver-exhibition-db` without a J
 | File | Target |
 | --- | --- |
 | `01_territory_dsp.sql` | `dsp.territory_level_*` on dsp-db (bbox + centroid) |
-| `01_territory_exhibition.sql` | same tables on exhibition-db (`geometry`) |
+| `01_territory_exhibition.sql` | same tables on exhibition-db (`geom`) |
 | `02_aoi_dsp.sql` | `dsp.area_of_interest` on dsp-db (+ themes) |
 | `02_aoi_exhibition.sql` | AOI on exhibition-db |
 

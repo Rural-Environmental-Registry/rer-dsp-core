@@ -72,7 +72,7 @@ batch:
       column-mapping:
         <source_pk>: id
         <source_name>: name
-        <source_geom>: geometry
+        <source_geom>: geom
       layer-name: territory-level-1
       srid: ${LAYER_SRS_TERRITORY_LEVEL_1:4326}
       change-detection-strategy: DEFAULT
@@ -95,7 +95,7 @@ batch:
         <source_pk>: id
         <source_name>: name
         <source_parent_pk>: parent_id
-        <source_geom>: geometry
+        <source_geom>: geom
       layer-name: territory-level-2
       srid: ${LAYER_SRS_TERRITORY_LEVEL_2:4326}
       change-detection-strategy: DEFAULT
@@ -117,7 +117,7 @@ batch:
         <source_pk>: id
         <source_name>: name
         <source_parent_pk>: parent_id
-        <source_geom>: geometry
+        <source_geom>: geom
       layer-name: territory-level-3
       srid: ${LAYER_SRS_TERRITORY_LEVEL_3:4326}
       change-detection-strategy: DEFAULT
@@ -152,7 +152,7 @@ batch:
       <source_updated_at>: alteration_date
       <source_territory_level_3_fk>: territory_level_3_id
       <source_area>: area
-      <source_geom>: geometry
+      <source_geom>: geom
       <source_theme_1>: theme_1
       <source_theme_2>: theme_2
       <source_theme_3>: theme_3
