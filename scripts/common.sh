@@ -172,6 +172,84 @@ for group in data.get("groups", []):
 PY
 }
 
+print_download_themes_preview() {
+  local cfg="$1"
+  info "Download themes configuration preview:"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "  File: $cfg"
+    return
+  fi
+  python3 - "$cfg" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
+
+print(f"  WFS base URL: {data.get('wfsBaseUrl', '<missing>')}")
+for theme in data.get("themes", []):
+    status = "enabled" if theme.get("enabled", True) else "disabled"
+    print(f"    - {theme.get('name', '?')} [{theme.get('typeName', '<missing>')}] ({status})")
+PY
+}
+
+validate_download_themes_config() {
+  local cfg="$1"
+  if ! command -v python3 >/dev/null 2>&1; then
+    error "python3 is required to validate downloadThemesConfig.json."
+    exit 1
+  fi
+  if ! python3 - "$cfg" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
+
+if not isinstance(data.get("wfsBaseUrl"), str) or not data["wfsBaseUrl"].strip():
+    raise SystemExit("wfsBaseUrl is required")
+
+themes = data.get("themes")
+if not isinstance(themes, list) or not themes:
+    raise SystemExit("themes must be a non-empty list")
+
+for index, theme in enumerate(themes):
+    prefix = f"themes[{index}]"
+    for key in ("code", "name", "typeName"):
+        value = theme.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise SystemExit(f"{prefix}.{key} is required")
+    formats = theme.get("formats")
+    if not isinstance(formats, list) or not formats:
+        raise SystemExit(f"{prefix}.formats must be a non-empty list")
+    territory_filter = theme.get("territoryFilter")
+    if not isinstance(territory_filter, dict):
+        raise SystemExit(f"{prefix}.territoryFilter is required")
+    strategy = territory_filter.get("strategy")
+    if strategy not in {"direct", "aoi_linked"}:
+        raise SystemExit(f"{prefix}.territoryFilter.strategy must be direct or aoi_linked")
+PY
+  then
+    error "downloadThemesConfig.json is invalid."
+    exit 1
+  fi
+  ok "Download themes config is valid"
+}
+
+ensure_download_themes_config() {
+  local example="$ROOT_DIR/config/downloads/downloadThemesConfig.json.example"
+  local active="$ROOT_DIR/config/downloads/downloadThemesConfig.json"
+
+  ensure_adopter_json_config \
+    "Download themes config" \
+    "$example" \
+    "$active" \
+    "download themes catalog for /downloads endpoints"
+
+  print_download_themes_preview "$active"
+  validate_download_themes_config "$active"
+}
+
 validate_map_layers_wms_ids() {
   local cfg="$1"
   if ! command -v python3 >/dev/null 2>&1; then
@@ -992,6 +1070,8 @@ ensure_quickstart_adopter_configs() {
   local map_example="$ROOT_DIR/config/map/mapLayersConfig.quickstart.json.example"
   local map_generic="$ROOT_DIR/config/map/mapLayersConfig.json.example"
   local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
+  local download_example="$ROOT_DIR/config/downloads/downloadThemesConfig.json.example"
+  local download_active="$ROOT_DIR/config/downloads/downloadThemesConfig.json"
 
   if [ ! -f "$install_example" ]; then
     error "Quickstart installation template not found at: $install_example"
@@ -1027,6 +1107,18 @@ ensure_quickstart_adopter_configs() {
     exit 1
   fi
   validate_map_layers_wms_ids "$map_active"
+
+  if [ ! -f "$download_active" ] || cmp -s "$download_active" "$download_example" 2>/dev/null; then
+    cp "$download_example" "$download_active"
+    info "Download themes config set from template: $download_active"
+  else
+    ok "Download themes config found: $download_active"
+  fi
+  if ! validate_json_file "$download_active"; then
+    error "Download themes config contains invalid JSON: $download_active"
+    exit 1
+  fi
+  validate_download_themes_config "$download_active"
 }
 
 is_quickstart_configured() {

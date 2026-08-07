@@ -5,6 +5,7 @@
 
 config/installation/installation-config.json
 config/map/mapLayersConfig.json
+config/downloads/downloadThemesConfig.json
 config/Job-Data-Migration/application/application.yaml
 config/adopter/adopter-config.yaml
 

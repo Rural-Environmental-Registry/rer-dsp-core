@@ -58,6 +58,7 @@ print_installation_preview "$INSTALLATION_CONFIG"
 step_header 5 "Map layers config (WMS / GeoServer)"
 
 ensure_map_layers_config
+ensure_download_themes_config
 
 if is_quickstart_configured; then
   info "Quickstart configuration detected."

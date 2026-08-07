@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
+FIXED_WFS_BASE_URL = FIXED_WMS_BASE_URL.replace("/wms", "/wfs")
 HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 LAYER_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DESTINATION_SCHEMA = "dsp"
@@ -435,6 +436,54 @@ def build_extra_map_layer(entry: dict[str, Any], group_json_key: str) -> dict[st
             "color": entry["color"],
             "fillColor": entry["fill_color"],
         },
+    }
+
+
+def layer_name_to_code(layer_name: str) -> str:
+    return layer_name.replace("-", "_")
+
+
+def build_download_themes_config(
+    values: dict[str, Any],
+    extra_layers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    layer_values = get(values, "map", "layers", default={})
+    aoi_override = layer_values.get("area_of_interest", {})
+    aoi_name = aoi_override.get("name", "Area of interest")
+
+    themes: list[dict[str, Any]] = [
+        {
+            "code": "area_of_interest",
+            "name": aoi_name,
+            "typeName": "dsp:area-of-interest",
+            "formats": ["csv"],
+            "enabled": True,
+            "territoryFilter": {
+                "strategy": "direct",
+                "level3Field": "territory_level_3_id",
+            },
+        }
+    ]
+
+    for entry in extra_layers:
+        layer_name = entry["layer_name"]
+        themes.append(
+            {
+                "code": layer_name_to_code(layer_name),
+                "name": entry["display_name"],
+                "typeName": entry["wms_id"],
+                "formats": ["csv"],
+                "enabled": True,
+                "territoryFilter": {
+                    "strategy": "aoi_linked",
+                    "aoiLinkField": "area_of_interest_id",
+                },
+            }
+        )
+
+    return {
+        "wfsBaseUrl": FIXED_WFS_BASE_URL,
+        "themes": themes,
     }
 
 
@@ -1030,6 +1079,10 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
                 f"\n  Note: {declared} generic layer(s) stay declared in etl.layers "
                 "but will not be migrated while layer jobs are disabled."
             )
+    print(
+        "\n  Note: enabled generic layers are also published as download themes "
+        "in downloadThemesConfig.json."
+    )
 
     active.parent.mkdir(parents=True, exist_ok=True)
     active.write_text(
@@ -1271,6 +1324,15 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     map_file = root / "config/map/mapLayersConfig.json"
     map_file.write_text(json.dumps(layers, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+    download_themes = build_download_themes_config(values, extra_layers)
+    download_dir = root / "config/downloads"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    download_file = root / "config/downloads/downloadThemesConfig.json"
+    download_file.write_text(
+        json.dumps(download_themes, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
     migration_example = root / "config/Job-Data-Migration/application/application.yaml.example"
     migration = yaml.safe_load(migration_example.read_text(encoding="utf-8"))
     etl = get(values, "etl", default={})
@@ -1336,6 +1398,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         print("Configuration files generated successfully.")
         if extra_layers:
             print(f"  Generic layers: {len(extra_layers)} (layer-jobs={layer_jobs_enabled})")
+        print(f"  Download themes: {len(download_themes.get('themes', []))}")
         print("\nNext steps:")
         print(f"  1. Review: {active}")
         print(

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Configure the adopter without exposing internal DSP file keys.
+# Generates installation-config.json, mapLayersConfig.json,
+# downloadThemesConfig.json and application.yaml via apply_adopter_config.py.
 # Usage: ./config.sh
 set -euo pipefail
 

@@ -98,6 +98,7 @@ fi
 step_header 6 "Map layers config (WMS / GeoServer)"
 
 ensure_map_layers_config
+ensure_download_themes_config
 
 step_header 7 "Migration config (JDBC + ETL)"
 
