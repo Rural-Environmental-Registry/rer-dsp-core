@@ -207,6 +207,7 @@ execution-jobs:
   admin-unit-level-2-geoserver-job: true
   admin-unit-level-3-geoserver-job: true
   area-of-interest-geoserver-job: true
+  layer-jobs: false
 
 logging:
   level:
