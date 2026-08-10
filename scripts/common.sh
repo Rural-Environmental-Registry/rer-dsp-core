@@ -635,12 +635,11 @@ print_migration_resync_hints() {
   if ! is_continuous_migration_mode; then
     return 0
   fi
+  local interval="${DSP_MIGRATION_SYNC_INTERVAL:-1h}"
   echo ""
-  echo "Migration execution mode: continuous (external scheduling)"
-  echo "Re-sync from source (one-shot run):"
+  echo "Migration execution mode: continuous (automatic re-sync every ${interval})"
+  echo "Optional one-shot re-sync (in addition to the scheduled loop):"
   echo "  docker compose --env-file .env --profile migration run --rm -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration"
-  echo "Or inside the running job container:"
-  echo "  docker compose --env-file .env --profile migration exec dsp-job-migration java \$JAVA_OPTS -jar /app/app.jar"
 }
 
 ensure_adopter_config() {
@@ -955,7 +954,56 @@ prompt_setup_data_mode() {
   esac
 }
 
+# Returns 0 if $1 is a valid sync interval (Nm or Nh, at least 5 minutes).
+is_valid_migration_sync_interval() {
+  local raw="$1"
+  local num unit seconds
+
+  if [[ ! "$raw" =~ ^[0-9]+[mh]$ ]]; then
+    return 1
+  fi
+
+  num="${raw%[mh]}"
+  unit="${raw#"${num}"}"
+
+  if [ -z "$num" ] || [ "$num" -eq 0 ]; then
+    return 1
+  fi
+
+  case "$unit" in
+    m) seconds=$((num * 60)) ;;
+    h) seconds=$((num * 3600)) ;;
+    *) return 1 ;;
+  esac
+
+  [ "$seconds" -ge 300 ]
+}
+
+# Sets global MIGRATION_SYNC_INTERVAL after continuous mode is chosen.
+prompt_migration_sync_interval() {
+  echo ""
+  echo "How often should the continuous migration re-sync from the source?"
+  echo "  Format: minutes (e.g. 30m) or hours (e.g. 1h, 6h)."
+  echo "  Minimum: 5m. Default: 1h."
+  echo ""
+
+  local raw=""
+  while true; do
+    read -r -p "Sync interval [1h]: " raw || true
+    if [ -z "$raw" ]; then
+      raw="1h"
+    fi
+    if is_valid_migration_sync_interval "$raw"; then
+      MIGRATION_SYNC_INTERVAL="$raw"
+      ok "Continuous sync interval: ${MIGRATION_SYNC_INTERVAL}"
+      return 0
+    fi
+    error "Invalid interval: '${raw}' — use Nm or Nh (e.g. 30m, 1h), minimum 5m."
+  done
+}
+
 # Sets global MIGRATION_EXECUTION_MODE (once|continuous) after option 2 in ./setup.sh.
+# When continuous, also sets MIGRATION_SYNC_INTERVAL via prompt_migration_sync_interval.
 prompt_migration_execution_mode() {
   echo ""
   echo "How should the migration job run after setup?"
@@ -963,18 +1011,20 @@ prompt_migration_execution_mode() {
   echo "  1) One-time initial migration (recommended for first import)"
   echo "     Runs the job once during setup; container is removed when finished."
   echo ""
-  echo "  2) Continuous service (external scheduling)"
-  echo "     Runs the initial migration, then keeps the migration stack available"
-  echo "     in Docker for your operations team to trigger re-syncs."
+  echo "  2) Continuous service (periodic re-sync)"
+  echo "     Runs the initial migration, then keeps the job container running"
+  echo "     and re-syncs from the source on an interval you choose."
   echo ""
   local choice=""
   read -r -p "Choice [1/2]: " choice || true
   case "$choice" in
     1|"")
       MIGRATION_EXECUTION_MODE="once"
+      MIGRATION_SYNC_INTERVAL=""
       ;;
     2)
       MIGRATION_EXECUTION_MODE="continuous"
+      prompt_migration_sync_interval
       ;;
     *)
       error "Invalid choice: '${choice}' — use 1 (one-time) or 2 (continuous service)."
@@ -1185,7 +1235,7 @@ print_stack_urls() {
     fi
     if is_continuous_migration_mode && is_stack_service_up dsp-job-migration; then
       svc_status="$(stack_service_status dsp-job-migration)"
-      print_stack_url_line "Migration job (service)" "$svc_status" "mode=continuous (idle — trigger re-sync externally)"
+      print_stack_url_line "Migration job (service)" "$svc_status" "mode=continuous (re-sync every ${DSP_MIGRATION_SYNC_INTERVAL:-1h})"
     fi
     return
   fi
@@ -1203,7 +1253,7 @@ print_stack_urls() {
     echo "Job migration DB:      ${migration_db_url}"
   fi
   if is_continuous_migration_mode && is_stack_service_up dsp-job-migration; then
-    echo "Migration job:         continuous service (idle — trigger re-sync externally)"
+    echo "Migration job:         continuous service (re-sync every ${DSP_MIGRATION_SYNC_INTERVAL:-1h})"
   fi
 }
 

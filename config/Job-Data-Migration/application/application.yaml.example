@@ -163,6 +163,16 @@ batch:
   # Generic layers: job creates dsp.<table> on geo-target automatically.
   # The AOI link column becomes area_of_interest_id on the target.
   # Generated from adopter-config etl.layers by ./config.sh.
+  # Example (commented — filled by ./config.sh):
+  # layers:
+  #   - source-table: conservation.mixed_geometries
+  #     area-of-interest-id-column: conservation_unit_id
+  #     primary-key: feature_id
+  #     geometry-column: boundary
+  #     layer-name: mixed_geometries
+  #     srid: 4674
+  #     where-clause: "1=1"
+  #     enabled: true
   layers: []
 
 parallelization:

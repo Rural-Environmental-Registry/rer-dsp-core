@@ -27,28 +27,28 @@ Migration remains blocked while placeholders exist in `application.yaml`.
 
 ## Modos de execução
 
-Escolhidos no `./setup.sh` (opção 2 → submenu). O valor fica em `.env` como `DSP_MIGRATION_EXECUTION_MODE`.
+Escolhidos no `./setup.sh` (opção 2 → submenu). Valores no `.env`:
+
+| Variável | Papel |
+| --- | --- |
+| `DSP_MIGRATION_EXECUTION_MODE` | `once` ou `continuous` |
+| `DSP_MIGRATION_SYNC_INTERVAL` | Intervalo do loop continuous (`Nm` ou `Nh`, mínimo `5m`, default `1h`) |
 
 | Modo | Quando usar | Comportamento |
 | --- | --- | --- |
 | `once` | Primeira carga / import pontual | Job roda uma vez no setup (`compose run --rm`); container some ao terminar; `./start.sh` não sobe migration |
-| `continuous` | Origem muda com frequência; agendamento externo | Setup faz carga inicial + deixa `dsp-job-migration-db` e `dsp-job-migration` ativos; `./start.sh` mantém a stack migration |
+| `continuous` | Origem muda com frequência | Setup faz carga inicial + deixa `dsp-job-migration-db` e `dsp-job-migration` ativos; o entrypoint reexecuta o JAR a cada `DSP_MIGRATION_SYNC_INTERVAL`; `./start.sh` mantém a stack migration |
 
-O modo `continuous` **não implementa agendamento** neste repositório — apenas mantém os containers prontos para outra equipe disparar re-syncs.
+Em modo `continuous`, o entrypoint aguarda um intervalo após o container subir (a carga inicial já rodou no setup) e então entra no loop: `java -jar` → sleep → repetir. Falha de um ciclo não derruba o container. Cada ciclo usa change detection — só registros alterados na origem são reprocessados.
 
-### Re-sync manual (modo `continuous`)
+### Re-sync manual adicional (modo `continuous`)
+
+Opcional — o agendamento interno já cobre o caso normal:
 
 ```bash
-# Execução pontual (recomendado)
 docker compose --env-file .env --profile migration run --rm \
   -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration
-
-# Dentro do container em idle
-docker compose --env-file .env --profile migration exec dsp-job-migration \
-  java $JAVA_OPTS -jar /app/app.jar
 ```
-
-Cada reexecução usa detecção de mudanças (`change-detection-strategy: DEFAULT`) — só registros alterados na origem são reprocessados.
 
 **Limitação:** invalidação automática de cache GeoServer após re-sync ainda não está implementada no job; re-syncs frequentes podem exigir truncate manual do GWC até essa integração existir.
 

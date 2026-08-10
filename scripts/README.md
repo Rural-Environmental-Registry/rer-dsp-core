@@ -18,14 +18,14 @@
 `setup.sh` always runs interactively (no CLI flags). Options:
 
 1. **Demonstration** — built-in Brazil seed; no JDBC; no migration job DB.
-2. **Real + ETL** — requires `./config.sh`; submenu **once** (pontual) ou **continuous** (serviço para agendamento externo).
+2. **Real + ETL** — requires `./config.sh`; submenu **once** (pontual) ou **continuous** (serviço com re-sync periódico).
 3. **Real without migration** — requires `./config.sh`; empty app DBs + GeoServer only.
 4. **Stack status / cleanup** — URLs and optional `docker compose --env-file .env --profile migration down -v --rmi all`.
 
-Modo ETL (`DSP_MIGRATION_EXECUTION_MODE` no `.env`):
+Modo ETL (`.env`):
 
-- **once** — migração inicial no setup; job some ao terminar; `./start.sh` não sobe migration.
-- **continuous** — carga inicial + containers `dsp-job-migration-db` e `dsp-job-migration` ficam ativos; `./start.sh` os mantém. Re-sync: ver [migration-config.md](../docs/migration-config.md).
+- **once** (`DSP_MIGRATION_EXECUTION_MODE=once`) — migração inicial no setup; job some ao terminar; `./start.sh` não sobe migration.
+- **continuous** — carga inicial + containers ativos; entrypoint re-sincroniza a cada `DSP_MIGRATION_SYNC_INTERVAL` (default `1h`). Detalhe: [migration-config.md](../docs/migration-config.md).
 
 `config.sh` fills `config/adopter/adopter-config.yaml`. When the file already
 exists, choose **1** to reapply, **2** to edit via wizard (current values shown

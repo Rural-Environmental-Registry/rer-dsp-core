@@ -176,6 +176,8 @@ etl:
   #   layers:
   #     - source_table: <schema>.<table>   # origin schema (e.g. public) — never dsp
   #       area_of_interest_id_column: <aoi_fk_column>
+  #       geometry_column: <geom_column>   # optional — when several geometry columns exist
+  #       primary_key: <pk_column>         # optional — when Postgres PK is missing/composite
   #       layer_name: <wms_id>             # technical id (lowercase, hyphens ok)
   #       srid: 4674
   #       enabled: true

@@ -323,6 +323,55 @@ def normalize_epsg(srid: Any) -> str:
     raise ValueError(f"Invalid srid value: {srid!r} (expected integer or EPSG:n).")
 
 
+def _optional_layer_field_as_str(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def resolve_optional_layer_field(
+    entry: dict[str, Any],
+    snake_key: str,
+    prefix: str,
+) -> str | None:
+    """Resolve an optional layer column from snake_case or kebab-case alias."""
+    kebab_key = snake_key.replace("_", "-")
+    snake_val = _optional_layer_field_as_str(entry.get(snake_key))
+    kebab_val = _optional_layer_field_as_str(entry.get(kebab_key))
+    if snake_val and kebab_val and snake_val != kebab_val:
+        raise ValueError(
+            f"{prefix}: conflicting values for {snake_key} ({snake_val!r}) "
+            f"and {kebab_key} ({kebab_val!r}). Use only {snake_key}."
+        )
+    return snake_val or kebab_val
+
+
+def normalize_adopter_layer_field_aliases(values: dict[str, Any]) -> bool:
+    """Rewrite kebab-case layer aliases to snake_case in adopter etl.layers."""
+    raw_layers = get(values, "etl", "layers", default=[])
+    if not isinstance(raw_layers, list):
+        return False
+    changed = False
+    for index, entry in enumerate(raw_layers):
+        if not isinstance(entry, dict):
+            continue
+        prefix = f"etl.layers[{index}]"
+        for snake_key in ("primary_key", "geometry_column"):
+            kebab_key = snake_key.replace("_", "-")
+            resolved = resolve_optional_layer_field(entry, snake_key, prefix)
+            if kebab_key in entry:
+                del entry[kebab_key]
+                changed = True
+            if resolved is not None:
+                if entry.get(snake_key) != resolved:
+                    entry[snake_key] = resolved
+                    changed = True
+            elif snake_key in entry:
+                del entry[snake_key]
+                changed = True
+    return changed
+
+
 def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
     """Validate and normalize etl.layers entries. Returns enabled layers only."""
     raw_layers = get(values, "etl", "layers", default=[])
@@ -408,9 +457,9 @@ def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
             "enabled": True,
         }
         for optional in ("primary_key", "geometry_column"):
-            value = entry.get(optional)
-            if isinstance(value, str) and value.strip():
-                normalized[optional] = value.strip()
+            value = resolve_optional_layer_field(entry, optional, prefix)
+            if value is not None:
+                normalized[optional] = value
         enabled.append(normalized)
     return enabled
 
@@ -651,6 +700,36 @@ def ask_generic_layer_entry(
             break
         print("\n  Enter the source column name.")
     entry["area_of_interest_id_column"] = aoi_column
+
+    for snake_key, label, description in (
+        (
+            "geometry_column",
+            "Geometry column (optional)",
+            "Source geometry column. Leave empty for the job to pick automatically "
+            "(first geometry); set when the table has more than one geometry column.",
+        ),
+        (
+            "primary_key",
+            "Primary key column (optional)",
+            "Source primary-key column. Leave empty to use the Postgres PK; "
+            "required when the table has no PK or a composite PK.",
+        ),
+    ):
+        kebab_key = snake_key.replace("_", "-")
+        default = entry.get(snake_key) or entry.get(kebab_key) or ""
+        value = str(
+            ask_field(
+                label,
+                default,
+                description,
+                "the migration job (batch.layers override)",
+            )
+        ).strip()
+        entry.pop(kebab_key, None)
+        if value:
+            entry[snake_key] = value
+        else:
+            entry.pop(snake_key, None)
 
     default_layer_name = entry.get("layer_name") or source_table.rsplit(".", 1)[-1]
     while True:
@@ -1119,6 +1198,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         raise ValueError("theme_count must be an integer between 0 and 4.")
     config_changed = reset_disabled_themes(values, template, theme_count)
     config_changed = sync_map_layer_names(values) or config_changed
+    config_changed = normalize_adopter_layer_field_aliases(values) or config_changed
     if config_changed:
         active.write_text(dump_yaml(values), encoding="utf-8")
     source_values = []
@@ -1301,7 +1381,14 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         if index > theme_count:
             aoi["column-mapping"].pop(key, None)
             continue
-        source = aoi_values[f"theme_{index}_column"]
+        source = aoi_values.get(f"theme_{index}_column")
+        if not isinstance(source, str) or not source.strip() or source.strip().lower() == "null":
+            raise ValueError(
+                f"etl.area_of_interest.theme_{index}_column is required when "
+                f"installation.kpis.theme_count is {theme_count}. "
+                "Set the source column, or lower theme_count to 0 if you have no theme KPIs."
+            )
+        source = source.strip()
         aoi["business-only-persist-columns"].append(source)
         if key in aoi["column-mapping"]:
             aoi["column-mapping"][source] = aoi["column-mapping"].pop(key)

@@ -14,7 +14,11 @@ They start when `./setup.sh` chooses option **2** (real adopter + ETL).
 | `DSP_MIGRATION_EXECUTION_MODE` | Behaviour |
 | --- | --- |
 | `once` (default) | Runs `java -jar /app/app.jar` and exits — used by `compose run --rm` |
-| `continuous` | Keeps the container idle (`sleep infinity`) for external scheduling |
+| `continuous` | After setup’s initial load, loops: wait `DSP_MIGRATION_SYNC_INTERVAL` → run JAR → repeat |
+
+| Variable | Notes |
+| --- | --- |
+| `DSP_MIGRATION_SYNC_INTERVAL` | `Nm` or `Nh` (e.g. `30m`, `1h`). Minimum `5m`. Default `1h`. Used only in `continuous`. |
 
 ## Setup commands
 
@@ -32,18 +36,11 @@ docker compose --env-file .env --profile migration run --rm --build \
 docker compose --env-file .env --profile migration up -d dsp-job-migration-db dsp-job-migration
 ```
 
-## Re-sync (external scheduling team)
+The continuous container schedules re-syncs itself. Optional one-shot on top of the loop:
 
 ```bash
 docker compose --env-file .env --profile migration run --rm \
   -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration
-```
-
-Or inside the idle container:
-
-```bash
-docker compose --env-file .env --profile migration exec dsp-job-migration \
-  java $JAVA_OPTS -jar /app/app.jar
 ```
 
 Compose mounts `../application/application.yaml`. Configure JDBC connections and
