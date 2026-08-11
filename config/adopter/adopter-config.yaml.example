@@ -175,7 +175,7 @@ etl:
   #
   #   layers:
   #     - source_table: <schema>.<table>   # origin schema (e.g. public) — never dsp
-  #       area_of_interest_id_column: <aoi_fk_column>
+  #       parent_key: <source_parent_pk>  # AOI parent_key (e.g. aeroporto_id)
   #       layer_name: <wms_id>             # technical id (lowercase, hyphens ok)
   #       srid: 4674
   #       enabled: true

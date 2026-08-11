@@ -161,7 +161,7 @@ batch:
     srid: ${LAYER_SRS_AREA_OF_INTEREST:4326}
     change-detection-strategy: DEFAULT
   # Generic layers: job creates dsp.<table> on geo-target automatically.
-  # The AOI link column becomes area_of_interest_id on the target.
+  # parent_key (AOI parent_key) becomes area_of_interest_id on the target.
   # Generated from adopter-config etl.layers by ./config.sh.
   layers: []
 

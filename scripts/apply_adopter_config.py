@@ -324,6 +324,15 @@ def normalize_epsg(srid: Any) -> str:
     raise ValueError(f"Invalid srid value: {srid!r} (expected integer or EPSG:n).")
 
 
+def resolve_layer_parent_key(entry: dict[str, Any]) -> str | None:
+    """Return the AOI parent_key for a generic layer (legacy: area_of_interest_id_column)."""
+    for key in ("parent_key", "area_of_interest_id_column"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
     """Validate and normalize etl.layers entries. Returns enabled layers only."""
     raw_layers = get(values, "etl", "layers", default=[])
@@ -350,9 +359,9 @@ def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
             raise ValueError(f"{prefix}.source_table still contains a placeholder.")
         validate_source_table_schema(source_table.strip(), prefix)
 
-        aoi_column = entry.get("area_of_interest_id_column")
-        if not isinstance(aoi_column, str) or not aoi_column.strip():
-            raise ValueError(f"{prefix}.area_of_interest_id_column is required.")
+        aoi_column = resolve_layer_parent_key(entry)
+        if not aoi_column:
+            raise ValueError(f"{prefix}.parent_key is required.")
 
         table = table_name_from_source(source_table)
         if table in seen_tables:
@@ -691,15 +700,17 @@ def ask_generic_layer_entry(
     while True:
         aoi_column = str(
             ask_field(
-                "Area of interest ID column", entry.get("area_of_interest_id_column", ""),
-                "Source column linking each feature to an area of interest.",
-                "the migration job (becomes area_of_interest_id)",
+                "parent_key",
+                resolve_layer_parent_key(entry) or "",
+                etl_field_help("parent_key"),
+                "the ETL job mapping for this entity",
             )
         ).strip()
         if aoi_column and "<" not in aoi_column:
             break
         print("\n  Enter the source column name.")
-    entry["area_of_interest_id_column"] = aoi_column
+    entry["parent_key"] = aoi_column
+    entry.pop("area_of_interest_id_column", None)
 
     default_layer_name = entry.get("layer_name") or source_table.rsplit(".", 1)[-1]
     while True:
