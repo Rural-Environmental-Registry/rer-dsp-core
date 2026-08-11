@@ -1070,7 +1070,8 @@ ensure_quickstart_adopter_configs() {
   local map_example="$ROOT_DIR/config/map/mapLayersConfig.quickstart.json.example"
   local map_generic="$ROOT_DIR/config/map/mapLayersConfig.json.example"
   local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
-  local download_example="$ROOT_DIR/config/downloads/downloadThemesConfig.json.example"
+  local download_example="$ROOT_DIR/config/downloads/downloadThemesConfig.quickstart.json.example"
+  local download_generic="$ROOT_DIR/config/downloads/downloadThemesConfig.json.example"
   local download_active="$ROOT_DIR/config/downloads/downloadThemesConfig.json"
 
   if [ ! -f "$install_example" ]; then
@@ -1108,9 +1109,14 @@ ensure_quickstart_adopter_configs() {
   fi
   validate_map_layers_wms_ids "$map_active"
 
-  if [ ! -f "$download_active" ] || cmp -s "$download_active" "$download_example" 2>/dev/null; then
+  if [ ! -f "$download_example" ]; then
+    error "Quickstart download themes template not found at: $download_example"
+    exit 1
+  fi
+
+  if [ ! -f "$download_active" ] || { [ -f "$download_generic" ] && cmp -s "$download_active" "$download_generic"; }; then
     cp "$download_example" "$download_active"
-    info "Download themes config set from template: $download_active"
+    info "Download themes config set from quickstart template: $download_active"
   else
     ok "Download themes config found: $download_active"
   fi
