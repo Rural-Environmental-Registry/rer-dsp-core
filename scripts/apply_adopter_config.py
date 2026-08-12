@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
-FIXED_WFS_BASE_URL = FIXED_WMS_BASE_URL.replace("/wms", "/wfs")
+# Downloads use GeoServer Download (separate from map Exhibition WMS).
+FIXED_WFS_BASE_URL = "http://localhost:22669/geoserver/dsp/wfs"
 HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 LAYER_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DESTINATION_SCHEMA = "dsp"
@@ -679,9 +680,10 @@ def ask_generic_layer_entry(
     entry = copy.deepcopy(entry) if entry else {}
 
     while True:
+        default_source = entry.get("source_table") or "public.my_layer"
         source_table = str(
             ask_field(
-                "Source table", entry.get("source_table", ""),
+                "Source table", default_source,
                 "Origin table (schema.table). Destination is always dsp.<table> — do not use schema 'dsp'.",
                 "the migration job (reads from your source database)",
             )

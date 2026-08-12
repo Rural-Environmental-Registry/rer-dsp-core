@@ -1,6 +1,8 @@
 # GeoServer Exhibition (DSP)
 
-Docker image for the map WMS used by the DSP UI (`mapLayersConfig.json`).
+Docker image for map WMS/WFS navigation used by the DSP UI (`mapLayersConfig.json`).
+
+Downloads (CSV/WFS export) use a separate GeoServer — see `config/GeoserverDownload/docker`.
 
 ## Image
 

@@ -12,6 +12,7 @@ STACK_REQUIRED_SERVICES=(
   dsp-db
   dsp-geoserver-exhibition-db
   dsp-geoserver-exhibition
+  dsp-geoserver-download
   dsp-backend
   dsp-frontend
 )
@@ -363,6 +364,7 @@ wait_for_geoserver() {
   local url="$1"
   local user="$2"
   local password="$3"
+  local compose_service="${4:-dsp-geoserver-exhibition}"
   local i
   for i in $(seq 1 60); do
     if command -v curl >/dev/null 2>&1; then
@@ -370,7 +372,7 @@ wait_for_geoserver() {
           "${url}/rest/about/version.json" >/dev/null 2>&1; then
         return 0
       fi
-    elif docker compose --env-file .env exec -T dsp-geoserver-exhibition \
+    elif docker compose --env-file .env exec -T "$compose_service" \
         curl -sf -u "${user}:${password}" \
         "http://localhost:8080/geoserver/rest/about/version.json" >/dev/null 2>&1; then
       return 0
@@ -452,6 +454,101 @@ yaml_target_table() {
   yaml_scalar "$1" "$2" "target-table"
 }
 
+# Print ETL lines for batch.layers (generic layers → geo-target dsp.<source_table>).
+# Prints nothing when the list is empty or missing (caller shows "(none)").
+yaml_generic_layers_etl_lines() {
+  local file="$1"
+  awk '
+    function leading_spaces(s) {
+      match(s, /^[ ]*/)
+      return RLENGTH
+    }
+    function flush_item() {
+      if (src == "") return
+      n = split(src, parts, ".")
+      tbl = parts[n]
+      tgt = "dsp." tbl
+      status = ""
+      if (enabled == "false") status = " (disabled)"
+      if (lname != "") {
+        print "      - " src " -> " tgt " [" lname "]" status
+      } else {
+        print "      - " src " -> " tgt status
+      }
+      src = ""; lname = ""; enabled = ""
+    }
+    BEGIN {
+      in_root_batch = 0
+      in_layers = 0
+      root_batch_indent = -1
+      layers_indent = -1
+      src = ""; lname = ""; enabled = ""
+    }
+    {
+      indent = leading_spaces($0)
+      line = $0
+      sub(/^[ ]+/, "", line)
+    }
+    !in_root_batch && indent == 0 && line ~ /^batch:/ {
+      in_root_batch = 1
+      root_batch_indent = indent
+      next
+    }
+    in_root_batch && !in_layers && line != "" && line !~ /^#/ && indent <= root_batch_indent {
+      in_root_batch = 0
+    }
+    in_root_batch && !in_layers && line ~ /^layers:/ {
+      rest = line
+      sub(/^layers:[ ]*/, "", rest)
+      if (rest ~ /^\[\]/) {
+        exit
+      }
+      in_layers = 1
+      layers_indent = indent
+      next
+    }
+    in_layers && line != "" && line !~ /^#/ {
+      # List items share the same indent as "layers:" (YAML: "layers:" then "- ...").
+      leave = 0
+      if (indent < layers_indent) leave = 1
+      if (indent == layers_indent && line !~ /^- /) leave = 1
+      if (leave) {
+        flush_item()
+        exit
+      }
+    }
+    in_layers && line ~ /^- / {
+      flush_item()
+      item = line
+      sub(/^- /, "", item)
+      if (item ~ /^source-table:/) {
+        sub(/^source-table:[ ]*/, "", item)
+        gsub(/^["'\'']|["'\'']$/, "", item)
+        src = item
+      }
+      next
+    }
+    in_layers && line ~ /^source-table:/ {
+      sub(/^source-table:[ ]*/, "", line)
+      gsub(/^["'\'']|["'\'']$/, "", line)
+      src = line
+      next
+    }
+    in_layers && line ~ /^layer-name:/ {
+      sub(/^layer-name:[ ]*/, "", line)
+      gsub(/^["'\'']|["'\'']$/, "", line)
+      lname = line
+      next
+    }
+    in_layers && line ~ /^enabled:/ {
+      sub(/^enabled:[ ]*/, "", line)
+      enabled = line
+      next
+    }
+    END { flush_item() }
+  ' "$file"
+}
+
 job_enabled_label() {
   if [ "${1:-false}" = "true" ]; then
     echo "enabled"
@@ -504,11 +601,15 @@ print_migration_preview() {
   aoi_src="$(yaml_source_table "$cfg" "area-of-interest")"
   aoi_tgt="$(yaml_target_table "$cfg" "area-of-interest")"
 
-  local j1 j2 j3 j_aoi
+  local generic_layers_lines
+  generic_layers_lines="$(yaml_generic_layers_etl_lines "$cfg")"
+
+  local j1 j2 j3 j_aoi j_layers
   j1="$(yaml_scalar "$cfg" "execution-jobs" "admin-unit-level-1-geoserver-job")"
   j2="$(yaml_scalar "$cfg" "execution-jobs" "admin-unit-level-2-geoserver-job")"
   j3="$(yaml_scalar "$cfg" "execution-jobs" "admin-unit-level-3-geoserver-job")"
   j_aoi="$(yaml_scalar "$cfg" "execution-jobs" "area-of-interest-geoserver-job")"
+  j_layers="$(yaml_scalar "$cfg" "execution-jobs" "layer-jobs")"
 
   info "Migration configuration preview:"
   echo "  Job execution: ${run_label} (will run via ./setup.sh)"
@@ -521,11 +622,18 @@ print_migration_preview() {
   echo "    level 2:          ${l2_src:-<missing>} -> ${l2_tgt:-<missing>}"
   echo "    level 3:          ${l3_src:-<missing>} -> ${l3_tgt:-<missing>}"
   echo "    area of interest: ${aoi_src:-<missing>} -> ${aoi_tgt:-<missing>}"
+  echo "    generic layers:"
+  if [ -n "$generic_layers_lines" ]; then
+    printf '%s\n' "$generic_layers_lines"
+  else
+    echo "      (none)"
+  fi
   echo "  Jobs:"
   echo "    level 1: $(job_enabled_label "$j1")"
   echo "    level 2: $(job_enabled_label "$j2")"
   echo "    level 3: $(job_enabled_label "$j3")"
   echo "    area of interest: $(job_enabled_label "$j_aoi")"
+  echo "    layer jobs: $(job_enabled_label "$j_layers")"
 }
 
 wait_for_db() {
@@ -983,7 +1091,7 @@ show_stack_status_menu() {
 # Not a command substitution on purpose: error output must reach the terminal.
 prompt_setup_data_mode() {
   echo ""
-  echo "This step prepares geographic data in the local DSP databases and publishes GeoServer layers."
+  echo "This step prepares geographic data in the local DSP databases and publishes GeoServer layers (Exhibition + Download)."
   echo "Pick the option that matches your goal:"
   echo ""
   echo "  1) Demonstration (built-in Brazil seed, no JDBC)"
@@ -1039,7 +1147,7 @@ prompt_migration_execution_mode() {
   echo "How should the migration job run after setup?"
   echo ""
   echo "  1) One-time initial migration (recommended for first import)"
-  echo "     Runs the job once during setup; container is removed when finished."
+  echo "     Runs the job once during setup, then stops and removes the migration job Docker container."
   echo ""
   echo "  2) Continuous service (external scheduling)"
   echo "     Runs the initial migration, then keeps the migration stack available"
@@ -1227,8 +1335,14 @@ start_geoserver_exhibition() {
     info "No migration YAML — using LAYER_SRS_* defaults (demonstration / no migration)."
   fi
 
-  info "Building and starting GeoServer Exhibition..."
-  docker compose --env-file .env up -d --build dsp-geoserver-exhibition
+  if [ "$mode" = "populate" ]; then
+    info "Building and starting GeoServer Exhibition..."
+    docker compose --env-file .env up -d --build dsp-geoserver-exhibition
+  else
+    # start.sh: ensure the container is up without forced rebuild (setup already published layers).
+    info "Starting GeoServer Exhibition..."
+    docker compose --env-file .env up -d dsp-geoserver-exhibition
+  fi
   ok "GeoServer Exhibition container started"
 
   GEOSERVER_HOST_PORT="${DSP_GEOSERVER_HOST_PORT:-22668}"
@@ -1236,8 +1350,9 @@ start_geoserver_exhibition() {
   GEOSERVER_ADMIN_USER="${DSP_GEOSERVER_ADMIN_USER:-admin}"
   GEOSERVER_ADMIN_PASSWORD="${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}"
 
-  info "Waiting for GeoServer REST API at ${GEOSERVER_PUBLIC_URL} ..."
-  if ! wait_for_geoserver "$GEOSERVER_PUBLIC_URL" "$GEOSERVER_ADMIN_USER" "$GEOSERVER_ADMIN_PASSWORD"; then
+  info "Waiting for GeoServer Exhibition REST API at ${GEOSERVER_PUBLIC_URL} ..."
+  if ! wait_for_geoserver "$GEOSERVER_PUBLIC_URL" "$GEOSERVER_ADMIN_USER" "$GEOSERVER_ADMIN_PASSWORD" \
+      "dsp-geoserver-exhibition"; then
     error "GeoServer Exhibition did not become ready in time."
     docker compose --env-file .env logs --tail 80 dsp-geoserver-exhibition || true
     exit 1
@@ -1245,15 +1360,49 @@ start_geoserver_exhibition() {
   ok "GeoServer Exhibition is ready"
 
   if [ "$mode" = "populate" ]; then
-    info "Publishing fixed DSP layers (workspace dsp)..."
+    info "Publishing map layers on GeoServer Exhibition (workspace dsp)..."
     docker compose --env-file .env exec -T dsp-geoserver-exhibition /opt/populate_geoserver.sh
-    ok "GeoServer layers published"
+    ok "GeoServer Exhibition layers published"
+  fi
+}
+
+start_geoserver_download() {
+  local mode="${1:-up}"
+
+  if [ "$mode" = "populate" ]; then
+    info "Building and starting GeoServer Download..."
+    docker compose --env-file .env up -d --build dsp-geoserver-download
+  else
+    info "Starting GeoServer Download..."
+    docker compose --env-file .env up -d dsp-geoserver-download
+  fi
+  ok "GeoServer Download container started"
+
+  GEOSERVER_DOWNLOAD_HOST_PORT="${DSP_GEOSERVER_DOWNLOAD_HOST_PORT:-22669}"
+  GEOSERVER_DOWNLOAD_PUBLIC_URL="http://${DSP_HTTP_HOST:-localhost}:${GEOSERVER_DOWNLOAD_HOST_PORT}/geoserver"
+  GEOSERVER_ADMIN_USER="${DSP_GEOSERVER_ADMIN_USER:-admin}"
+  GEOSERVER_ADMIN_PASSWORD="${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}"
+
+  info "Waiting for GeoServer Download REST API at ${GEOSERVER_DOWNLOAD_PUBLIC_URL} ..."
+  if ! wait_for_geoserver "$GEOSERVER_DOWNLOAD_PUBLIC_URL" "$GEOSERVER_ADMIN_USER" "$GEOSERVER_ADMIN_PASSWORD" \
+      "dsp-geoserver-download"; then
+    error "GeoServer Download did not become ready in time."
+    docker compose --env-file .env logs --tail 80 dsp-geoserver-download || true
+    exit 1
+  fi
+  ok "GeoServer Download is ready"
+
+  if [ "$mode" = "populate" ]; then
+    info "Publishing download layers on GeoServer Download (workspace dsp)..."
+    docker compose --env-file .env exec -T dsp-geoserver-download /opt/populate_geoserver.sh
+    ok "GeoServer Download layers published"
   fi
 }
 
 print_stack_urls() {
   local show_status="${1:-}"
   local geoserver_url="${GEOSERVER_PUBLIC_URL:-http://${DSP_HTTP_HOST:-localhost}:${DSP_GEOSERVER_HOST_PORT:-22668}/geoserver}"
+  local geoserver_download_url="${GEOSERVER_DOWNLOAD_PUBLIC_URL:-http://${DSP_HTTP_HOST:-localhost}:${DSP_GEOSERVER_DOWNLOAD_HOST_PORT:-22669}/geoserver}"
   local http_host="${DSP_HTTP_HOST:-localhost}"
   local frontend_url="http://${http_host}:${DSP_FRONTEND_HOST_PORT:-22667}${VITE_BASE_URL:-/dsp/}"
   local backend_url="http://${http_host}:${DSP_BACKEND_HOST_PORT:-22666}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
@@ -1273,6 +1422,9 @@ print_stack_urls() {
     svc_status="$(stack_service_status dsp-geoserver-exhibition)"
     print_stack_url_line "GeoServer Exhibition" "$svc_status" "${geoserver_url}/web/"
     print_stack_url_line "GeoServer WMS" "$svc_status" "${geoserver_url}/dsp/wms"
+    svc_status="$(stack_service_status dsp-geoserver-download)"
+    print_stack_url_line "GeoServer Download" "$svc_status" "${geoserver_download_url}/web/"
+    print_stack_url_line "GeoServer Download WFS" "$svc_status" "${geoserver_download_url}/dsp/wfs"
     svc_status="$(stack_service_status dsp-db)"
     print_stack_url_line "DSP DB" "$svc_status" "${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
     svc_status="$(stack_service_status dsp-geoserver-exhibition-db)"
@@ -1295,6 +1447,8 @@ print_stack_urls() {
   echo "Map layers:            ${backend_url}/map/getLayers"
   echo "GeoServer Exhibition:  ${geoserver_url}/web/"
   echo "GeoServer WMS:         ${geoserver_url}/dsp/wms"
+  echo "GeoServer Download:    ${geoserver_download_url}/web/"
+  echo "GeoServer Download WFS: ${geoserver_download_url}/dsp/wfs"
   echo "DSP DB:                ${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
   echo "GeoServer Exhibition DB: ${http_host}:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
   if is_stack_service_up dsp-job-migration-db; then

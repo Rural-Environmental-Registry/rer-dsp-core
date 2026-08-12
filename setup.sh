@@ -58,9 +58,10 @@ if [ "$SETUP_MODE" = "demo" ]; then
   step_header 7 "Quickstart seed"
   apply_quickstart_seed
 
-  step_header 8 "GeoServer Exhibition (publish layers)"
+  step_header 8 "GeoServers (publish layers)"
   use_quickstart_layer_srids
   start_geoserver_exhibition "populate" ""
+  start_geoserver_download "populate"
 
   ok "Setup finished — demonstration data is ready on Docker volumes."
   echo ""
@@ -158,9 +159,10 @@ else
   info "Data migration skipped (option 3 — real adopter without ETL)."
 fi
 
-step_header 10 "GeoServer Exhibition (publish layers)"
+step_header 10 "GeoServers (publish layers)"
 
 start_geoserver_exhibition "populate" "$MIGRATION_CONFIG"
+start_geoserver_download "populate"
 
 ok "Setup finished — data is ready on Docker volumes."
 echo ""

@@ -90,10 +90,11 @@ else
   info "Migration is not run by ./start.sh. Use ./setup.sh when you need to (re)migrate."
 fi
 
-step_header 8 "GeoServer Exhibition + application containers"
+step_header 8 "GeoServers + application containers"
 
 MIGRATION_CONFIG="$ROOT_DIR/config/Job-Data-Migration/application/application.yaml"
 start_geoserver_exhibition "up" "$MIGRATION_CONFIG"
+start_geoserver_download "up"
 
 info "Building and starting application containers..."
 docker compose --env-file .env up -d --build dsp-backend dsp-frontend
