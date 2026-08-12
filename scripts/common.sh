@@ -10,7 +10,7 @@ TOTAL_STEPS="${TOTAL_STEPS:-0}"
 declare -gA STACK_SERVICE_STATUSES=()
 STACK_REQUIRED_SERVICES=(
   dsp-db
-  dsp-geoserver-exhibition-db
+  dsp-geoserver-db
   dsp-geoserver-exhibition
   dsp-geoserver-download
   dsp-backend
@@ -862,12 +862,12 @@ start_databases_and_wait() {
   local include_migration_db="${1:-false}"
 
   if [ "$include_migration_db" = "true" ]; then
-    info "Starting databases (dsp-db, dsp-geoserver-exhibition-db, dsp-job-migration-db)..."
+    info "Starting databases (dsp-db, dsp-geoserver-db, dsp-job-migration-db)..."
     docker compose --env-file .env --profile migration up -d \
-      dsp-db dsp-geoserver-exhibition-db dsp-job-migration-db
+      dsp-db dsp-geoserver-db dsp-job-migration-db
   else
-    info "Starting databases (dsp-db, dsp-geoserver-exhibition-db)..."
-    docker compose --env-file .env up -d dsp-db dsp-geoserver-exhibition-db
+    info "Starting databases (dsp-db, dsp-geoserver-db)..."
+    docker compose --env-file .env up -d dsp-db dsp-geoserver-db
   fi
   ok "Database containers started"
 
@@ -883,16 +883,16 @@ start_databases_and_wait() {
   fi
   ok "dsp-db ready"
 
-  if ! wait_for_db dsp-geoserver-exhibition-db "${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}" "${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}"; then
-    error "dsp-geoserver-exhibition-db did not become ready in time."
+  if ! wait_for_db dsp-geoserver-db "${DSP_GEOSERVER_DB_USER:-dsp_geo}" "${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}"; then
+    error "dsp-geoserver-db did not become ready in time."
     exit 1
   fi
-  if ! wait_for_db_schema dsp-geoserver-exhibition-db "${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}" "${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}" dsp; then
-    error "dsp-geoserver-exhibition-db init SQL did not create schema 'dsp' in time."
-    docker compose --env-file .env logs --tail 40 dsp-geoserver-exhibition-db || true
+  if ! wait_for_db_schema dsp-geoserver-db "${DSP_GEOSERVER_DB_USER:-dsp_geo}" "${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}" dsp; then
+    error "dsp-geoserver-db init SQL did not create schema 'dsp' in time."
+    docker compose --env-file .env logs --tail 40 dsp-geoserver-db || true
     exit 1
   fi
-  ok "dsp-geoserver-exhibition-db ready"
+  ok "dsp-geoserver-db ready"
 
   if [ "$include_migration_db" = "true" ]; then
     if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
@@ -1288,8 +1288,8 @@ apply_quickstart_seed() {
   local seed_dir="$ROOT_DIR/config/db/seed/quickstart"
   local dsp_user="${DSP_DB_USER:-dsp}"
   local dsp_db="${DSP_DB_NAME:-dsp-db}"
-  local geo_user="${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
-  local geo_db="${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}"
+  local geo_user="${DSP_GEOSERVER_DB_USER:-dsp_geo}"
+  local geo_db="${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}"
 
   for f in \
     "$seed_dir/01_territory_dsp.sql" \
@@ -1312,14 +1312,14 @@ apply_quickstart_seed() {
     <"$seed_dir/02_aoi_dsp.sql"
   ok "dsp-db seeded"
 
-  info "Applying quickstart seed to dsp-geoserver-exhibition-db..."
-  docker compose --env-file .env exec -T dsp-geoserver-exhibition-db \
+  info "Applying quickstart seed to dsp-geoserver-db..."
+  docker compose --env-file .env exec -T dsp-geoserver-db \
     psql -q -v ON_ERROR_STOP=1 -U "$geo_user" -d "$geo_db" \
     <"$seed_dir/01_territory_exhibition.sql"
-  docker compose --env-file .env exec -T dsp-geoserver-exhibition-db \
+  docker compose --env-file .env exec -T dsp-geoserver-db \
     psql -q -v ON_ERROR_STOP=1 -U "$geo_user" -d "$geo_db" \
     <"$seed_dir/02_aoi_exhibition.sql"
-  ok "exhibition-db seeded"
+  ok "geoserver-db seeded"
 
   warn "Demonstration data only — heavily simplified Brazil geometries, not production."
 }
@@ -1427,8 +1427,8 @@ print_stack_urls() {
     print_stack_url_line "GeoServer Download WFS" "$svc_status" "${geoserver_download_url}/dsp/wfs"
     svc_status="$(stack_service_status dsp-db)"
     print_stack_url_line "DSP DB" "$svc_status" "${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
-    svc_status="$(stack_service_status dsp-geoserver-exhibition-db)"
-    print_stack_url_line "GeoServer Exhibition DB" "$svc_status" "${http_host}:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
+    svc_status="$(stack_service_status dsp-geoserver-db)"
+    print_stack_url_line "GeoServer DB" "$svc_status" "${http_host}:${DSP_GEOSERVER_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}  user=${DSP_GEOSERVER_DB_USER:-dsp_geo}"
     if is_stack_service_up dsp-job-migration-db; then
       svc_status="$(stack_service_status dsp-job-migration-db)"
       print_stack_url_line "Job migration DB" "$svc_status" "$migration_db_url"
@@ -1450,7 +1450,7 @@ print_stack_urls() {
   echo "GeoServer Download:    ${geoserver_download_url}/web/"
   echo "GeoServer Download WFS: ${geoserver_download_url}/dsp/wfs"
   echo "DSP DB:                ${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
-  echo "GeoServer Exhibition DB: ${http_host}:${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}  user=${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}"
+  echo "GeoServer DB: ${http_host}:${DSP_GEOSERVER_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}  user=${DSP_GEOSERVER_DB_USER:-dsp_geo}"
   if is_stack_service_up dsp-job-migration-db; then
     echo "Job migration DB:      ${migration_db_url}"
   fi
@@ -1463,7 +1463,7 @@ print_stack_usage_hints() {
   echo ""
   echo "Verify tables:"
   echo "  docker compose exec dsp-db psql -U ${DSP_DB_USER:-dsp} -d ${DSP_DB_NAME:-dsp-db} -c '\\dt dsp.*'"
-  echo "  docker compose exec dsp-geoserver-exhibition-db psql -U ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo} -d ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db} -c '\\dt dsp.*'"
+  echo "  docker compose exec dsp-geoserver-db psql -U ${DSP_GEOSERVER_DB_USER:-dsp_geo} -d ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db} -c '\\dt dsp.*'"
   echo ""
   echo "Migrate / (re)populate data:"
   echo "  ./setup.sh"

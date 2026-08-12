@@ -169,7 +169,7 @@ etl:
     theme_4_column: <source_theme_4>
     where_clause: "1=1"
   # Extra geographic layers (generic). Each item migrates to dsp.<table> on
-  # exhibition-db, is published to GeoServer, and appears in the map panel.
+  # geoserver-db, is published to GeoServer, and appears in the map panel.
   # Presentation and ETL share one entry to avoid drift. Leave empty when unused.
   # Filled by ./config.sh (stage 5) or edited here directly.
   #

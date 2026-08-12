@@ -1,15 +1,15 @@
 # Quickstart seed (demonstration only)
 
-Static SQL that populates `dsp-db` and `dsp-geoserver-exhibition-db` without a JDBC source or migration job.
+Static SQL that populates `dsp-db` and `dsp-geoserver-db` without a JDBC source or migration job.
 
 ## Contents
 
 | File | Target |
 | --- | --- |
 | `01_territory_dsp.sql` | `dsp.territory_level_*` on dsp-db (bbox + centroid) |
-| `01_territory_exhibition.sql` | same tables on exhibition-db (`geometry`) |
+| `01_territory_exhibition.sql` | same tables on geoserver-db (`geometry`) |
 | `02_aoi_dsp.sql` | `dsp.area_of_interest` on dsp-db (+ themes) |
-| `02_aoi_exhibition.sql` | AOI on exhibition-db |
+| `02_aoi_exhibition.sql` | AOI on geoserver-db |
 
 ## Hierarchy
 

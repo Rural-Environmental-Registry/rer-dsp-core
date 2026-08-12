@@ -1,7 +1,7 @@
 -- Operational administrative units (API / KPIs / search).
 -- Tables: dsp.territory_level_1 / _2 / _3
 -- Geo on dsp-db: boundary_box + centroid_coordinates (no full polygon).
--- Full polygon lives in dsp-geoserver-exhibition-db.
+-- Full polygon lives in dsp-geoserver-db.
 
 CREATE SCHEMA IF NOT EXISTS dsp;
 

@@ -2,7 +2,7 @@
 
 Docker image for WFS export used by the DSP backend downloads (`downloadThemesConfig.json` / `DSP_GEOSERVER_WFS_BASE_URL`).
 
-Shares the same PostGIS database as GeoServer Exhibition (`dsp-geoserver-exhibition-db`). Layers are published from the same `mapLayersConfig.json` so download `typeName`s stay aligned with the map.
+Shares the same PostGIS database as GeoServer Exhibition (`dsp-geoserver-db`). Layers are published from the same `mapLayersConfig.json` so download `typeName`s stay aligned with the map.
 
 ## Image
 
@@ -21,7 +21,7 @@ Shares the same PostGIS database as GeoServer Exhibition (`dsp-geoserver-exhibit
 
 ## Published layers
 
-Same FeatureTypes as Exhibition (from `mapLayersConfig.json`). Populate does **not** create tables — it only publishes layers for tables already in `dsp-geoserver-exhibition-db`.
+Same FeatureTypes as Exhibition (from `mapLayersConfig.json`). Populate does **not** create tables — it only publishes layers for tables already in `dsp-geoserver-db`.
 
 ## Manual populate
 
