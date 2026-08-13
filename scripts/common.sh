@@ -732,6 +732,226 @@ require_docker() {
   ok "Docker and Docker Compose OK"
 }
 
+DSP_REPO_BACKEND_URL="https://github.com/Rural-Environmental-Registry/rer-dsp-backend.git"
+DSP_REPO_FRONTEND_URL="https://github.com/Rural-Environmental-Registry/rer-dsp-frontend.git"
+DSP_REPO_JOB_URL="https://github.com/Rural-Environmental-Registry/rer-dsp-job-data-migration.git"
+
+require_git() {
+  if ! command -v git >/dev/null 2>&1; then
+    error "Git is required to clone missing repositories."
+    error "Install Git or clone the repositories manually."
+    exit 1
+  fi
+}
+
+classify_dsp_repository_path() {
+  local abs="$1"
+
+  if [ -f "$abs/Dockerfile" ]; then
+    echo "ok"
+  elif [ -e "$abs" ]; then
+    echo "invalid"
+  else
+    echo "missing"
+  fi
+}
+
+print_dsp_repository_preview() {
+  local core_abs="$1"
+  shift
+  local -a preview_lines=()
+  local line=""
+
+  while [ "$#" -gt 0 ]; do
+    preview_lines+=("$1")
+    shift
+  done
+
+  echo ""
+  info "Missing repositories detected."
+  echo ""
+  echo "Folder structure after clone:"
+  echo ""
+
+  local common_parent=""
+  local uses_sibling_layout=true
+  local core_parent
+  core_parent="$(dirname "$core_abs")"
+
+  for line in "${preview_lines[@]}"; do
+    IFS='|' read -r _label abs _url status <<<"$line"
+    if [ "$(dirname "$abs")" != "$core_parent" ]; then
+      uses_sibling_layout=false
+      break
+    fi
+  done
+
+  if [ "$uses_sibling_layout" = true ]; then
+    common_parent="$core_parent"
+    echo "  ${common_parent}/"
+    echo "  ├── rer-dsp-core/              (already exists — you are here)"
+
+    for line in "${preview_lines[@]}"; do
+      IFS='|' read -r label abs _url status <<<"$line"
+      local folder
+      folder="$(basename "$abs")"
+      case "$status" in
+        ok)
+          echo "  ├── ${folder}/              (already exists)"
+          ;;
+        missing)
+          echo "  ├── ${folder}/           <- will be cloned"
+          ;;
+      esac
+    done
+  else
+    echo "  ${core_abs}/              (already exists — you are here)"
+    for line in "${preview_lines[@]}"; do
+      IFS='|' read -r label abs _url status <<<"$line"
+      case "$status" in
+        ok)
+          echo "  ${abs}/              (already exists)"
+          ;;
+        missing)
+          echo "  ${abs}/           <- will be cloned"
+          ;;
+      esac
+    done
+  fi
+
+  echo ""
+  echo "Details:"
+  for line in "${preview_lines[@]}"; do
+    IFS='|' read -r label abs url status <<<"$line"
+    echo "  ${label}"
+    echo "    destination: ${abs}"
+    if [ "$status" = "missing" ]; then
+      echo "    source:      ${url}"
+    fi
+  done
+  echo ""
+}
+
+ensure_dsp_repositories() {
+  local want_backend=false
+  local want_frontend=false
+  local want_job=false
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --backend)
+        want_backend=true
+        ;;
+      --frontend)
+        want_frontend=true
+        ;;
+      --job)
+        want_job=true
+        ;;
+      *)
+        error "Unknown ensure_dsp_repositories option: $1"
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  if [ "$want_backend" = false ] && [ "$want_frontend" = false ] && [ "$want_job" = false ]; then
+    error "ensure_dsp_repositories: pass at least one of --backend, --frontend, --job"
+    exit 1
+  fi
+
+  local core_abs
+  core_abs="$(resolve_path ".")"
+  local -a preview_lines=()
+  local -a missing_labels=()
+  local -a missing_abs=()
+  local -a missing_urls=()
+
+  _ensure_dsp_repo_check() {
+    local label="$1"
+    local path="$2"
+    local url="$3"
+    local found_label="$4"
+    local abs
+    local status
+
+    abs="$(resolve_path "$path")"
+    status="$(classify_dsp_repository_path "$abs")"
+
+    case "$status" in
+      ok)
+        ok "${found_label} found: ${abs}"
+        preview_lines+=("${label}|${abs}|${url}|ok")
+        ;;
+      invalid)
+        error "${found_label} directory exists but Dockerfile is missing: ${abs}"
+        error "Fix the path in .env or use a valid clone of ${label}."
+        exit 1
+        ;;
+      missing)
+        preview_lines+=("${label}|${abs}|${url}|missing")
+        missing_labels+=("$label")
+        missing_abs+=("$abs")
+        missing_urls+=("$url")
+        ;;
+    esac
+  }
+
+  if [ "$want_backend" = true ]; then
+    _ensure_dsp_repo_check \
+      "rer-dsp-backend" \
+      "${DSP_BACKEND_PATH:-../rer-dsp-backend}" \
+      "$DSP_REPO_BACKEND_URL" \
+      "Backend"
+  fi
+
+  if [ "$want_frontend" = true ]; then
+    _ensure_dsp_repo_check \
+      "rer-dsp-frontend" \
+      "${DSP_FRONTEND_PATH:-../rer-dsp-frontend}" \
+      "$DSP_REPO_FRONTEND_URL" \
+      "Frontend"
+  fi
+
+  if [ "$want_job" = true ]; then
+    _ensure_dsp_repo_check \
+      "rer-dsp-job-data-migration" \
+      "${DSP_JOB_MIGRATION_PATH:-../rer-dsp-job-data-migration}" \
+      "$DSP_REPO_JOB_URL" \
+      "Migration job"
+  fi
+
+  if [ "${#missing_labels[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  print_dsp_repository_preview "$core_abs" "${preview_lines[@]}"
+
+  if ! prompt_yes_no "Proceed with clone?"; then
+    error "Missing repositories are required to continue."
+    error "Clone them manually or run this script again and confirm the clone."
+    exit 1
+  fi
+
+  require_git
+
+  local i
+  for i in "${!missing_labels[@]}"; do
+    local dest="${missing_abs[$i]}"
+    local parent
+    parent="$(dirname "$dest")"
+    mkdir -p "$parent"
+    info "Cloning ${missing_labels[$i]} into ${dest}..."
+    git clone "${missing_urls[$i]}" "$dest"
+    if [ ! -f "$dest/Dockerfile" ]; then
+      error "Clone completed but Dockerfile not found at: ${dest}"
+      exit 1
+    fi
+    ok "${missing_labels[$i]} cloned: ${dest}"
+  done
+}
+
 # Reject legacy env vars that used to control migration on/off.
 # Decision is interactive in ./setup.sh only (call after ensure_dotenv).
 reject_legacy_migration_env() {

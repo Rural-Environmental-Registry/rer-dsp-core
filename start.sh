@@ -21,26 +21,8 @@ reject_legacy_migration_env
 
 step_header 3 "Repository paths (backend / frontend)"
 
-BACKEND_PATH="${DSP_BACKEND_PATH:-../rer-dsp-backend}"
-FRONTEND_PATH="${DSP_FRONTEND_PATH:-../rer-dsp-frontend}"
-
 info "Resolving repository paths..."
-BACKEND_ABS="$(resolve_path "$BACKEND_PATH")"
-FRONTEND_ABS="$(resolve_path "$FRONTEND_PATH")"
-
-if [ ! -f "$BACKEND_ABS/Dockerfile" ]; then
-  error "Backend not found at: $BACKEND_ABS"
-  error "Clone rer-dsp-backend as a sibling or set DSP_BACKEND_PATH in .env"
-  exit 1
-fi
-ok "Backend found: $BACKEND_ABS"
-
-if [ ! -f "$FRONTEND_ABS/Dockerfile" ]; then
-  error "Frontend not found at: $FRONTEND_ABS"
-  error "Clone rer-dsp-frontend as a sibling or set DSP_FRONTEND_PATH in .env"
-  exit 1
-fi
-ok "Frontend found: $FRONTEND_ABS"
+ensure_dsp_repositories --backend --frontend
 
 step_header 4 "Installation config (UI labels, screens, KPIs)"
 

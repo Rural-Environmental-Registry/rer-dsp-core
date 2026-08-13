@@ -36,13 +36,37 @@ configuração do adotante para toda a stack DSP.
 
 Docker Compose, PostgreSQL/PostGIS, GeoServer, Bash, Python.
 
+## Pré-requisitos
+
+| Ferramenta | Versão | Uso |
+|------------|--------|-----|
+| Git | 2.x+ | Clonar repositórios irmãos (automático ou manual), se ainda não existirem |
+| Docker | 24+ com Compose v2 | Subir bancos, GeoServer e módulos |
+| Python | 3 | Wizard `./config.sh` |
+
 ## Como executar
 
+Clone apenas o core e siga os scripts. Os demais repositórios podem ser clonados
+automaticamente quando ausentes (`./config.sh`, `./setup.sh` e `./start.sh` exibem
+a estrutura de pastas antes de confirmar o clone). O `.env` é criado automaticamente
+a partir de `.env.example` na primeira execução.
+
 ```bash
-cp .env.example .env
+git clone https://github.com/Rural-Environmental-Registry/rer-dsp-core.git
+cd rer-dsp-core
 ./config.sh
 ./setup.sh
 ./start.sh
+```
+
+Estrutura esperada após o setup (layout padrão):
+
+```text
+DSP/
+├── rer-dsp-core/
+├── rer-dsp-backend/
+├── rer-dsp-frontend/
+└── rer-dsp-job-data-migration/
 ```
 
 ## Licença
