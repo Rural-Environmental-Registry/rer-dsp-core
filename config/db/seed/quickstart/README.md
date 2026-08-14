@@ -33,4 +33,6 @@ Static SQL that populates `dsp-db` and `dsp-geoserver-db` without a JDBC source 
 
 Applied by `./setup.sh` when you choose option **1** (demonstration).
 
+The quickstart `installation-config.json` uses **`map.initialView.mode: manual`** (center Brazil, zoom 4) so the home map always opens framed on the demo territory without depending on `GET /territory/boundary-box` at first load.
+
 Do **not** use these files for production or as a real adopter mapping.

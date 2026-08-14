@@ -943,7 +943,11 @@ ensure_dsp_repositories() {
     parent="$(dirname "$dest")"
     mkdir -p "$parent"
     info "Cloning ${missing_labels[$i]} into ${dest}..."
-    git clone "${missing_urls[$i]}" "$dest"
+    if [ -n "${DSP_REPO_CLONE_BRANCH:-}" ]; then
+      git clone -b "$DSP_REPO_CLONE_BRANCH" "${missing_urls[$i]}" "$dest"
+    else
+      git clone "${missing_urls[$i]}" "$dest"
+    fi
     if [ ! -f "$dest/Dockerfile" ]; then
       error "Clone completed but Dockerfile not found at: ${dest}"
       exit 1
@@ -1390,42 +1394,39 @@ prompt_migration_execution_mode() {
   esac
 }
 
-# Ensure UI/map configs for demo without blocking on "edit the template".
+# Ensures quickstart UI/map configs (overwrites configs from another installation).
 ensure_quickstart_adopter_configs() {
   local install_example="$ROOT_DIR/config/installation/installation-config.quickstart.json.example"
-  local install_generic="$ROOT_DIR/config/installation/installation-config.json.example"
   local install_active="$ROOT_DIR/config/installation/installation-config.json"
   local map_example="$ROOT_DIR/config/map/mapLayersConfig.quickstart.json.example"
-  local map_generic="$ROOT_DIR/config/map/mapLayersConfig.json.example"
   local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
   local download_example="$ROOT_DIR/config/downloads/downloadThemesConfig.quickstart.json.example"
-  local download_generic="$ROOT_DIR/config/downloads/downloadThemesConfig.json.example"
   local download_active="$ROOT_DIR/config/downloads/downloadThemesConfig.json"
 
   if [ ! -f "$install_example" ]; then
     error "Quickstart installation template not found at: $install_example"
     exit 1
   fi
-
-  if [ ! -f "$install_active" ] || { [ -f "$install_generic" ] && cmp -s "$install_active" "$install_generic"; }; then
-    cp "$install_example" "$install_active"
-    info "Installation config set from quickstart template:"
-    echo "       $install_active"
-  else
-    ok "Installation config found: $install_active"
-  fi
-
   if [ ! -f "$map_example" ]; then
     error "Quickstart map layers template not found at: $map_example"
     exit 1
   fi
-
-  if [ ! -f "$map_active" ] || { [ -f "$map_generic" ] && cmp -s "$map_active" "$map_generic"; }; then
-    cp "$map_example" "$map_active"
-    info "Map layers config set from quickstart template: $map_active"
-  else
-    ok "Map layers config found: $map_active"
+  if [ ! -f "$download_example" ]; then
+    error "Quickstart download themes template not found at: $download_example"
+    exit 1
   fi
+
+  cp "$install_example" "$install_active"
+  info "Installation config set from quickstart template:"
+  echo "       $install_active"
+
+  cp "$map_example" "$map_active"
+  info "Map layers config set from quickstart template:"
+  echo "       $map_active"
+
+  cp "$download_example" "$download_active"
+  info "Download themes config set from quickstart template:"
+  echo "       $download_active"
 
   if ! validate_json_file "$install_active"; then
     error "Installation config contains invalid JSON: $install_active"
@@ -1437,17 +1438,6 @@ ensure_quickstart_adopter_configs() {
   fi
   validate_map_layers_wms_ids "$map_active"
 
-  if [ ! -f "$download_example" ]; then
-    error "Quickstart download themes template not found at: $download_example"
-    exit 1
-  fi
-
-  if [ ! -f "$download_active" ] || { [ -f "$download_generic" ] && cmp -s "$download_active" "$download_generic"; }; then
-    cp "$download_example" "$download_active"
-    info "Download themes config set from quickstart template: $download_active"
-  else
-    ok "Download themes config found: $download_active"
-  fi
   if ! validate_json_file "$download_active"; then
     error "Download themes config contains invalid JSON: $download_active"
     exit 1
@@ -1460,20 +1450,20 @@ is_quickstart_configured() {
   local install_active="$ROOT_DIR/config/installation/installation-config.json"
   local map_example="$ROOT_DIR/config/map/mapLayersConfig.quickstart.json.example"
   local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
+  local download_example="$ROOT_DIR/config/downloads/downloadThemesConfig.quickstart.json.example"
+  local download_active="$ROOT_DIR/config/downloads/downloadThemesConfig.json"
   local adopter_config="$ROOT_DIR/config/adopter/adopter-config.yaml"
 
-  if [ ! -f "$adopter_config" ] &&
-    [ -f "$install_active" ] &&
-    [ -f "$map_active" ]; then
-    return 0
-  fi
-
-  [ -f "$install_example" ] &&
+  [ ! -f "$adopter_config" ] &&
+    [ -f "$install_example" ] &&
     [ -f "$install_active" ] &&
     [ -f "$map_example" ] &&
     [ -f "$map_active" ] &&
+    [ -f "$download_example" ] &&
+    [ -f "$download_active" ] &&
     cmp -s "$install_active" "$install_example" &&
-    cmp -s "$map_active" "$map_example"
+    cmp -s "$map_active" "$map_example" &&
+    cmp -s "$download_active" "$download_example"
 }
 
 use_quickstart_layer_srids() {
