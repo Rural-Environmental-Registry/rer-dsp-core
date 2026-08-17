@@ -1,4 +1,4 @@
--- Quickstart seed: territory levels for exhibition-db (demo only, SRID 4674).
+-- Quickstart seed: territory levels for geoserver-db (demo only, SRID 4674).
 -- Neighbouring boundaries are shared: states touch without gaps or overlaps.
 TRUNCATE dsp.area_of_interest, dsp.territory_level_3, dsp.territory_level_2, dsp.territory_level_1 CASCADE;
 

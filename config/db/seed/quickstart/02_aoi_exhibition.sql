@@ -1,4 +1,4 @@
--- Quickstart seed: area_of_interest for exhibition-db (demo only, SRID 4674).
+-- Quickstart seed: area_of_interest for geoserver-db (demo only, SRID 4674).
 TRUNCATE dsp.area_of_interest CASCADE;
 
 INSERT INTO dsp.area_of_interest

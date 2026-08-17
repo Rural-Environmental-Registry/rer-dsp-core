@@ -37,7 +37,7 @@ spring:
         minimum-idle: 5
         pool-name: target-pool
     geo-target:
-      url: jdbc:postgresql://dsp-geoserver-exhibition-db:5432/dsp-geoserver-exhibition-db
+      url: jdbc:postgresql://dsp-geoserver-db:5432/dsp-geoserver-db
       username: dsp_geo
       password: dsp_geo
       driver-class-name: org.postgresql.Driver
@@ -129,7 +129,7 @@ batch:
     primary-key: <source_pk>
     geometry-column: <source_geom>
     where-clause: "1=1"
-    # Columns compared for change detection (exhibition-db). Do not list themes here.
+    # Columns compared for change detection (geoserver-db). Do not list themes here.
     comparison-columns:
       - <source_updated_at>
       - <source_territory_level_3_fk>
@@ -140,7 +140,7 @@ batch:
       - <source_updated_at>
       - <source_territory_level_3_fk>
       - <source_area>
-    # Written only to dsp-db (not exhibition-db). Remove if you have no theme KPIs.
+    # Written only to dsp-db (not geoserver-db). Remove if you have no theme KPIs.
     business-only-persist-columns:
       - <source_theme_1>
       - <source_theme_2>
@@ -161,7 +161,7 @@ batch:
     srid: ${LAYER_SRS_AREA_OF_INTEREST:4326}
     change-detection-strategy: DEFAULT
   # Generic layers: job creates dsp.<table> on geo-target automatically.
-  # The AOI link column becomes area_of_interest_id on the target.
+  # parent_key (AOI parent_key) becomes area_of_interest_id on the target.
   # Generated from adopter-config etl.layers by ./config.sh.
   # Example (commented — filled by ./config.sh):
   # layers:

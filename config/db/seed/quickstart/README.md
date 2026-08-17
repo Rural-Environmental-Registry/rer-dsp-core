@@ -1,15 +1,19 @@
 # Quickstart seed (demonstration only)
 
-Static SQL that populates `dsp-db` and `dsp-geoserver-exhibition-db` without a JDBC source or migration job.
+Static SQL that populates `dsp-db` and `dsp-geoserver-db` without a JDBC source or migration job.
 
 ## Contents
 
 | File | Target |
 | --- | --- |
 | `01_territory_dsp.sql` | `dsp.territory_level_*` on dsp-db (bbox + centroid) |
+<<<<<<< HEAD
 | `01_territory_exhibition.sql` | same tables on exhibition-db (`geom`) |
+=======
+| `01_territory_exhibition.sql` | same tables on geoserver-db (`geometry`) |
+>>>>>>> 86e6d172b29bcf56843a8f66025d1013f1e298b0
 | `02_aoi_dsp.sql` | `dsp.area_of_interest` on dsp-db (+ themes) |
-| `02_aoi_exhibition.sql` | AOI on exhibition-db |
+| `02_aoi_exhibition.sql` | AOI on geoserver-db |
 
 ## Hierarchy
 
@@ -32,5 +36,7 @@ Static SQL that populates `dsp-db` and `dsp-geoserver-exhibition-db` without a J
 ## Usage
 
 Applied by `./setup.sh` when you choose option **1** (demonstration).
+
+The quickstart `installation-config.json` uses **`map.initialView.mode: manual`** (center Brazil, zoom 4) so the home map always opens framed on the demo territory without depending on `GET /territory/boundary-box` at first load.
 
 Do **not** use these files for production or as a real adopter mapping.

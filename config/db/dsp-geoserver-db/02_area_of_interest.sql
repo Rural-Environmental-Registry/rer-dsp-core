@@ -1,4 +1,4 @@
--- Area of interest for WMS display (GeoServer Exhibition).
+-- Area of interest for GeoServers (Exhibition + Download).
 -- Depends on dsp.territory_level_3 (script 01_admin_units.sql).
 -- SRID defined at runtime by the migration job (no fixed typmod).
 

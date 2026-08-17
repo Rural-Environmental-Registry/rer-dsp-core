@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
+# Downloads use GeoServer Download (separate from map Exhibition WMS).
+FIXED_WFS_BASE_URL = "http://localhost:22669/geoserver/dsp/wfs"
 HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 LAYER_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DESTINATION_SCHEMA = "dsp"
@@ -141,6 +143,37 @@ def ask_int_field(
         return value
 
 
+def ask_float_field(
+    label: str,
+    default: Any,
+    description: str,
+    used_in: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    while True:
+        print(f"\n  {label}")
+        print(f"  What: {description}")
+        print(f"  Used in: {used_in}")
+        raw = ask("  Value", default)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            print("\n  Enter a numeric value.")
+            continue
+        if not (value == value and abs(value) != float("inf")):
+            print("\n  Enter a finite numeric value.")
+            continue
+        if minimum is not None and value < minimum:
+            print(f"\n  Enter a value greater than or equal to {minimum}.")
+            continue
+        if maximum is not None and value > maximum:
+            print(f"\n  Enter a value less than or equal to {maximum}.")
+            continue
+        return value
+
+
 def ask_color_field(
     label: str,
     default: Any,
@@ -227,6 +260,247 @@ def reset_disabled_themes(
 
 def enabled_kpi_codes(theme_count: int) -> tuple[str, ...]:
     return ("area_of_interest",) + tuple(f"theme_{index}" for index in range(1, theme_count + 1))
+
+
+MAP_VIEW_MODES = ("territorial_bbox", "manual", "planet")
+PLANET_CENTER_LAT = 0.0
+PLANET_CENTER_LNG = 0.0
+PLANET_ZOOM = 0
+
+
+def is_source_table_placeholder(source_table: str) -> bool:
+    normalized = source_table.strip()
+    return not normalized or "<source_" in normalized or normalized == "source_schema.source_table"
+
+
+def is_territory_level_etl_configured(values: dict[str, Any], level: str) -> bool:
+    jobs = get(values, "etl", "jobs", default={}) or {}
+    if jobs.get(level) is False:
+        return False
+    source_table = str(get(values, "etl", level, "source_table", default=""))
+    return not is_source_table_placeholder(source_table)
+
+
+def is_level1_source_configured(values: dict[str, Any]) -> bool:
+    return is_territory_level_etl_configured(values, "level1")
+
+
+def is_territorial_bbox_viable(values: dict[str, Any]) -> bool:
+    """True when at least one territorial level can feed GET /territory/boundary-box."""
+    return any(
+        is_territory_level_etl_configured(values, level)
+        for level in ("level1", "level2", "level3")
+    )
+
+
+TERRITORIAL_BBOX_PLANET_REASON = (
+    "Territorial geometry cannot be resolved from the ETL configuration "
+    "(no enabled level1/level2/level3 source table)."
+)
+
+
+def coerce_map_initial_view_to_planet(values: dict[str, Any]) -> bool:
+    """Switch territorial_bbox to planet when the frontend would fall back to the globe."""
+    initial_view = get(values, "map", "initial_view", default={}) or {}
+    if initial_view.get("mode") != "territorial_bbox":
+        return False
+    if is_territorial_bbox_viable(values):
+        return False
+
+    map_config = values.setdefault("map", {})
+    initial_view = map_config.setdefault("initial_view", {})
+    initial_view["mode"] = "planet"
+    initial_view["latitude"] = None
+    initial_view["longitude"] = None
+    initial_view["zoom"] = None
+
+    print()
+    print("  Map initial view: adjusted automatically.")
+    print(f"  {TERRITORIAL_BBOX_PLANET_REASON}")
+    print("  Changed map.initial_view.mode from 'territorial_bbox' to 'planet'.")
+    return True
+
+
+def _initial_view_coordinate_fields(initial_view: dict[str, Any]) -> dict[str, Any]:
+    return {
+        name: initial_view.get(name)
+        for name in ("latitude", "longitude", "zoom")
+    }
+
+
+def _has_any_coordinate_field(fields: dict[str, Any]) -> bool:
+    return any(
+        value is not None and not (isinstance(value, str) and not value.strip())
+        for value in fields.values()
+    )
+
+
+def _build_initial_view_json(
+    mode: str,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    zoom: int | None = None,
+) -> dict[str, Any]:
+    return {
+        "initialView": {
+            "mode": mode,
+            "latitude": latitude,
+            "longitude": longitude,
+            "zoom": zoom,
+        }
+    }
+
+
+def validate_map_initial_view(values: dict[str, Any]) -> dict[str, Any]:
+    """Validate map.initial_view and return the installation map block."""
+    initial_view = get(values, "map", "initial_view", default={}) or {}
+    mode = initial_view.get("mode")
+    if not isinstance(mode, str) or mode not in MAP_VIEW_MODES:
+        raise ValueError(
+            "map.initial_view.mode is required and must be one of: "
+            + ", ".join(MAP_VIEW_MODES)
+            + "."
+        )
+
+    coordinate_fields = _initial_view_coordinate_fields(initial_view)
+    has_coordinates = _has_any_coordinate_field(coordinate_fields)
+
+    if mode in ("territorial_bbox", "planet"):
+        if has_coordinates:
+            raise ValueError(
+                f"map.initial_view.latitude, longitude, and zoom must be null when "
+                f"mode is '{mode}'."
+            )
+        return _build_initial_view_json(mode)
+
+    latitude = coordinate_fields["latitude"]
+    longitude = coordinate_fields["longitude"]
+    zoom = coordinate_fields["zoom"]
+    if not has_coordinates or any(
+        value is None or (isinstance(value, str) and not value.strip())
+        for value in coordinate_fields.values()
+    ):
+        raise ValueError(
+            "map.initial_view requires latitude, longitude, and zoom when mode is 'manual'."
+        )
+
+    try:
+        lat = float(latitude)
+        lng = float(longitude)
+        zoom_value = int(zoom)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "map.initial_view latitude and longitude must be numbers; zoom must be an integer."
+        ) from exc
+
+    if not (-90 <= lat <= 90):
+        raise ValueError("map.initial_view.latitude must be between -90 and 90.")
+    if not (-180 <= lng <= 180):
+        raise ValueError("map.initial_view.longitude must be between -180 and 180.")
+    if not (0 <= zoom_value <= 16):
+        raise ValueError("map.initial_view.zoom must be an integer between 0 and 16.")
+
+    return _build_initial_view_json(
+        "manual",
+        latitude=lat,
+        longitude=lng,
+        zoom=zoom_value,
+    )
+
+
+def ask_map_initial_view(config: dict[str, Any]) -> None:
+    """Configure the home map initial view mode."""
+    map_config = config.setdefault("map", {})
+    initial_view = map_config.setdefault(
+        "initial_view",
+        {
+            "mode": "territorial_bbox",
+            "latitude": None,
+            "longitude": None,
+            "zoom": None,
+        },
+    )
+
+    print("\n  Initial map view")
+    print("  What: Controls how the home map opens and returns to its default view")
+    print("        (Center map tool and Clear search on the home page).")
+    print("  Used in: the home page map")
+    print()
+    print("  Choose one mode:")
+    print("    1. territorial_bbox — automatic framing from migrated L1/L2/L3 geometries")
+    print("    2. manual — fixed latitude, longitude, and zoom")
+    print("    3. planet — always show the whole world (zoomed out)")
+    print()
+    print("  If territorial_bbox is selected but no territorial level (L1/L2/L3) is")
+    print("  configured in the ETL, the mode will be set to 'planet' automatically")
+    print("  when configuration is applied (same view the frontend would use as fallback).")
+
+    current_mode = initial_view.get("mode", "territorial_bbox")
+    if current_mode not in MAP_VIEW_MODES:
+        current_mode = "territorial_bbox"
+
+    while True:
+        print(f"\n  Current mode: {current_mode}")
+        choice = ask("  Mode (1=territorial_bbox, 2=manual, 3=planet)", {
+            "territorial_bbox": "1",
+            "manual": "2",
+            "planet": "3",
+        }.get(current_mode, "1"))
+        if choice == "1":
+            selected_mode = "territorial_bbox"
+            break
+        if choice == "2":
+            selected_mode = "manual"
+            break
+        if choice == "3":
+            selected_mode = "planet"
+            break
+        print("\n  Enter 1, 2, or 3.")
+
+    initial_view["mode"] = selected_mode
+
+    if selected_mode == "territorial_bbox":
+        initial_view["latitude"] = None
+        initial_view["longitude"] = None
+        initial_view["zoom"] = None
+        if not is_territorial_bbox_viable(config):
+            print()
+            print("  Note: no territorial level (L1/L2/L3) is configured in the ETL yet.")
+            print("  If that remains true after the wizard, map.initial_view.mode will be")
+            print("  changed to 'planet' automatically when configuration is applied.")
+        return
+
+    if selected_mode == "planet":
+        initial_view["latitude"] = None
+        initial_view["longitude"] = None
+        initial_view["zoom"] = None
+        return
+
+    initial_view["latitude"] = ask_float_field(
+        "Initial center latitude",
+        initial_view.get("latitude", -14.2),
+        "Decimal degrees between -90 and 90. Example: -14.2 for central Brazil.",
+        "the map center on load and when resetting the view",
+        minimum=-90,
+        maximum=90,
+    )
+    initial_view["longitude"] = ask_float_field(
+        "Initial center longitude",
+        initial_view.get("longitude", -51.9),
+        "Decimal degrees between -180 and 180. Example: -51.9 for central Brazil.",
+        "the map center on load and when resetting the view",
+        minimum=-180,
+        maximum=180,
+    )
+    initial_view["zoom"] = ask_int_field(
+        "Initial zoom level",
+        initial_view.get("zoom", 10),
+        "Whole number from 0 (world) to 16 (closest). Higher values zoom in more.",
+        "the map framing on load and when resetting the view",
+        minimum=0,
+        maximum=16,
+    )
 
 
 def ask_kpi_accent_colors(config: dict[str, Any], theme_count: int) -> None:
@@ -323,53 +597,13 @@ def normalize_epsg(srid: Any) -> str:
     raise ValueError(f"Invalid srid value: {srid!r} (expected integer or EPSG:n).")
 
 
-def _optional_layer_field_as_str(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+def resolve_layer_parent_key(entry: dict[str, Any]) -> str | None:
+    """Return the AOI parent_key for a generic layer (legacy: area_of_interest_id_column)."""
+    for key in ("parent_key", "area_of_interest_id_column"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return None
-
-
-def resolve_optional_layer_field(
-    entry: dict[str, Any],
-    snake_key: str,
-    prefix: str,
-) -> str | None:
-    """Resolve an optional layer column from snake_case or kebab-case alias."""
-    kebab_key = snake_key.replace("_", "-")
-    snake_val = _optional_layer_field_as_str(entry.get(snake_key))
-    kebab_val = _optional_layer_field_as_str(entry.get(kebab_key))
-    if snake_val and kebab_val and snake_val != kebab_val:
-        raise ValueError(
-            f"{prefix}: conflicting values for {snake_key} ({snake_val!r}) "
-            f"and {kebab_key} ({kebab_val!r}). Use only {snake_key}."
-        )
-    return snake_val or kebab_val
-
-
-def normalize_adopter_layer_field_aliases(values: dict[str, Any]) -> bool:
-    """Rewrite kebab-case layer aliases to snake_case in adopter etl.layers."""
-    raw_layers = get(values, "etl", "layers", default=[])
-    if not isinstance(raw_layers, list):
-        return False
-    changed = False
-    for index, entry in enumerate(raw_layers):
-        if not isinstance(entry, dict):
-            continue
-        prefix = f"etl.layers[{index}]"
-        for snake_key in ("primary_key", "geometry_column"):
-            kebab_key = snake_key.replace("_", "-")
-            resolved = resolve_optional_layer_field(entry, snake_key, prefix)
-            if kebab_key in entry:
-                del entry[kebab_key]
-                changed = True
-            if resolved is not None:
-                if entry.get(snake_key) != resolved:
-                    entry[snake_key] = resolved
-                    changed = True
-            elif snake_key in entry:
-                del entry[snake_key]
-                changed = True
-    return changed
 
 
 def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
@@ -398,9 +632,9 @@ def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
             raise ValueError(f"{prefix}.source_table still contains a placeholder.")
         validate_source_table_schema(source_table.strip(), prefix)
 
-        aoi_column = entry.get("area_of_interest_id_column")
-        if not isinstance(aoi_column, str) or not aoi_column.strip():
-            raise ValueError(f"{prefix}.area_of_interest_id_column is required.")
+        aoi_column = resolve_layer_parent_key(entry)
+        if not aoi_column:
+            raise ValueError(f"{prefix}.parent_key is required.")
 
         table = table_name_from_source(source_table)
         if table in seen_tables:
@@ -484,6 +718,54 @@ def build_extra_map_layer(entry: dict[str, Any], group_json_key: str) -> dict[st
             "color": entry["color"],
             "fillColor": entry["fill_color"],
         },
+    }
+
+
+def layer_name_to_code(layer_name: str) -> str:
+    return layer_name.replace("-", "_")
+
+
+def build_download_themes_config(
+    values: dict[str, Any],
+    extra_layers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    layer_values = get(values, "map", "layers", default={})
+    aoi_override = layer_values.get("area_of_interest", {})
+    aoi_name = aoi_override.get("name", "Area of interest")
+
+    themes: list[dict[str, Any]] = [
+        {
+            "code": "area_of_interest",
+            "name": aoi_name,
+            "typeName": "dsp:area-of-interest",
+            "formats": ["csv"],
+            "enabled": True,
+            "territoryFilter": {
+                "strategy": "direct",
+                "level3Field": "territory_level_3_id",
+            },
+        }
+    ]
+
+    for entry in extra_layers:
+        layer_name = entry["layer_name"]
+        themes.append(
+            {
+                "code": layer_name_to_code(layer_name),
+                "name": entry["display_name"],
+                "typeName": entry["wms_id"],
+                "formats": ["csv"],
+                "enabled": True,
+                "territoryFilter": {
+                    "strategy": "aoi_linked",
+                    "aoiLinkField": "area_of_interest_id",
+                },
+            }
+        )
+
+    return {
+        "wfsBaseUrl": FIXED_WFS_BASE_URL,
+        "themes": themes,
     }
 
 
@@ -670,9 +952,10 @@ def ask_generic_layer_entry(
     entry = copy.deepcopy(entry) if entry else {}
 
     while True:
+        default_source = entry.get("source_table") or "public.my_layer"
         source_table = str(
             ask_field(
-                "Source table", entry.get("source_table", ""),
+                "Source table", default_source,
                 "Origin table (schema.table). Destination is always dsp.<table> — do not use schema 'dsp'.",
                 "the migration job (reads from your source database)",
             )
@@ -691,45 +974,17 @@ def ask_generic_layer_entry(
     while True:
         aoi_column = str(
             ask_field(
-                "Area of interest ID column", entry.get("area_of_interest_id_column", ""),
-                "Source column linking each feature to an area of interest.",
-                "the migration job (becomes area_of_interest_id)",
+                "parent_key",
+                resolve_layer_parent_key(entry) or "",
+                etl_field_help("parent_key"),
+                "the ETL job mapping for this entity",
             )
         ).strip()
         if aoi_column and "<" not in aoi_column:
             break
         print("\n  Enter the source column name.")
-    entry["area_of_interest_id_column"] = aoi_column
-
-    for snake_key, label, description in (
-        (
-            "geometry_column",
-            "Geometry column (optional)",
-            "Source geometry column. Leave empty for the job to pick automatically "
-            "(first geometry); set when the table has more than one geometry column.",
-        ),
-        (
-            "primary_key",
-            "Primary key column (optional)",
-            "Source primary-key column. Leave empty to use the Postgres PK; "
-            "required when the table has no PK or a composite PK.",
-        ),
-    ):
-        kebab_key = snake_key.replace("_", "-")
-        default = entry.get(snake_key) or entry.get(kebab_key) or ""
-        value = str(
-            ask_field(
-                label,
-                default,
-                description,
-                "the migration job (batch.layers override)",
-            )
-        ).strip()
-        entry.pop(kebab_key, None)
-        if value:
-            entry[snake_key] = value
-        else:
-            entry.pop(snake_key, None)
+    entry["parent_key"] = aoi_column
+    entry.pop("area_of_interest_id_column", None)
 
     default_layer_name = entry.get("layer_name") or source_table.rsplit(".", 1)[-1]
     while True:
@@ -945,7 +1200,9 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
     ask_screen_text_fields(screens)
     theme_count = ask_int_field(
         "Number of theme KPIs (0-4)", config["installation"]["kpis"]["theme_count"],
-        "Number of optional theme measurements available in the source data.",
+        "Number of optional theme measurements available in the source data. "
+        "The Area of Interest (AOI) KPI is always present — this value only "
+        "controls additional theme KPIs (use 0 when there are no theme columns).",
         "generated KPI cards and ETL theme mappings",
         minimum=0,
         maximum=4,
@@ -997,6 +1254,7 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
     print("Stage 3/5 — KPI colors and map layers")
     print("=" * 72)
     ask_kpi_accent_colors(config, theme_count)
+    ask_map_initial_view(config)
     group_names = config["map"]["group_names"]
     group_names["territorial_division"] = ask_field(
         "Map group name — territorial division", group_names["territorial_division"],
@@ -1109,6 +1367,10 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
                 f"\n  Note: {declared} generic layer(s) stay declared in etl.layers "
                 "but will not be migrated while layer jobs are disabled."
             )
+    print(
+        "\n  Note: enabled generic layers are also published as download themes "
+        "in downloadThemesConfig.json."
+    )
 
     active.parent.mkdir(parents=True, exist_ok=True)
     active.write_text(
@@ -1249,6 +1511,9 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
                 f"map.layers.{layer_name}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
             )
     extra_layers = validate_extra_layers(values)
+    if coerce_map_initial_view_to_planet(values):
+        active.write_text(dump_yaml(values), encoding="utf-8")
+    map_initial_view = validate_map_initial_view(values)
     kpis = get(values, "installation", "kpis", default={})
     for code in enabled_kpi_codes(theme_count):
         accent_color = get(kpis, code, "accent_color")
@@ -1313,6 +1578,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     installation["formats"]["dateTime"] = formats.get(
         "date_time", installation["formats"]["dateTime"]
     )
+    installation["map"] = map_initial_view
     install_file = root / "config/installation/installation-config.json"
     install_file.write_text(
         json.dumps(installation, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -1350,6 +1616,15 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     append_extra_layers_to_map(layers, values, extra_layers)
     map_file = root / "config/map/mapLayersConfig.json"
     map_file.write_text(json.dumps(layers, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    download_themes = build_download_themes_config(values, extra_layers)
+    download_dir = root / "config/downloads"
+    download_dir.mkdir(parents=True, exist_ok=True)
+    download_file = root / "config/downloads/downloadThemesConfig.json"
+    download_file.write_text(
+        json.dumps(download_themes, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     migration_example = root / "config/Job-Data-Migration/application/application.yaml.example"
     migration = yaml.safe_load(migration_example.read_text(encoding="utf-8"))
@@ -1423,6 +1698,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         print("Configuration files generated successfully.")
         if extra_layers:
             print(f"  Generic layers: {len(extra_layers)} (layer-jobs={layer_jobs_enabled})")
+        print(f"  Download themes: {len(download_themes.get('themes', []))}")
         print("\nNext steps:")
         print(f"  1. Review: {active}")
         print(

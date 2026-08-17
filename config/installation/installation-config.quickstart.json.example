@@ -122,5 +122,13 @@
   "formats": {
     "date": "dd/MM/yyyy",
     "dateTime": "dd/MM/yyyy HH:mm:ss"
+  },
+  "map": {
+    "initialView": {
+      "mode": "manual",
+      "latitude": -14.2,
+      "longitude": -51.9,
+      "zoom": 4
+    }
   }
 }

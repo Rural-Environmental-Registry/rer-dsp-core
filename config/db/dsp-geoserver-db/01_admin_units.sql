@@ -1,4 +1,4 @@
--- Administrative units for WMS display (GeoServer Exhibition).
+-- Administrative units for GeoServers (Exhibition + Download).
 -- Tables: dsp.territory_level_1 / _2 / _3 — full MultiPolygon geometry.
 -- SRID defined at runtime by the migration job (no fixed typmod).
 

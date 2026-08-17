@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: run via ./setup.sh (publishes layers from mapLayersConfig.json)
+# Usage: run via ./setup.sh (publishes layers from mapLayersConfig.json for WFS downloads)
 
 set -euo pipefail
 
@@ -570,7 +570,7 @@ sync_layer_from_config() {
   publish_layer "$layer_name" "$table_name" "$style_name" "$srs"
 }
 
-echo "=== DSP GeoServer Exhibition populate ==="
+echo "=== DSP GeoServer Download populate ==="
 echo "URL: ${GEOSERVER_URL}"
 echo "DB:  ${DB_HOST}:${DB_PORT}/${DB_NAME} schema=${DB_SCHEMA}"
 echo "Map layers config: ${MAP_LAYERS_CONFIG}"
@@ -592,5 +592,5 @@ for wms_id in "${WMS_IDS[@]}"; do
 done
 
 echo ""
-echo "Done. WMS: ${GEOSERVER_URL}/${WORKSPACE_NAME}/wms"
+echo "Done. WFS: ${GEOSERVER_URL}/${WORKSPACE_NAME}/wfs"
 echo "Published ${#WMS_IDS[@]} layer(s) from mapLayersConfig.json"
