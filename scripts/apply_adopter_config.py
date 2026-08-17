@@ -1119,6 +1119,29 @@ def ask_data_preparation_flow() -> bool:
             print("Invalid choice. Enter 1, 2, or 3.")
 
 
+def ask_existing_config_file(active: Path) -> bool:
+    print("\nDo you already have an adopter configuration file?")
+    print("  1. No — create one with this guided wizard")
+    print("  2. Yes — I will copy my file to the expected location")
+
+    while True:
+        choice = ask("Choice", "1")
+        if choice == "1":
+            print(f"\nThe wizard will create {active} when you finish.")
+            print(
+                "You can edit that YAML manually at any time; run ./config.sh "
+                "and choose 1 (reapply) to regenerate the operational files."
+            )
+            return True
+        if choice == "2":
+            resolved = active.resolve()
+            print(f"\nPlace your adopter-config.yaml at:\n  {resolved}")
+            print("You can edit that file manually whenever you need.")
+            print("When ready, run ./config.sh and choose 1 (reapply).")
+            return False
+        print("Invalid choice. Enter 1 or 2.")
+
+
 def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
     print()
     template = yaml.safe_load(example.read_text(encoding="utf-8"))
@@ -1141,6 +1164,8 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         print("Values between brackets are default/example values.")
         print("Press Enter to accept the displayed default/example value.")
         if not ask_data_preparation_flow():
+            return False
+        if not ask_existing_config_file(active):
             return False
 
     print("\n" + "=" * 72)
