@@ -14,6 +14,25 @@ APPLY="$ROOT_DIR/scripts/apply_adopter_config.py"
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/common.sh"
 
+print_config_intro() {
+  echo ""
+  echo "Guided Adopter Configuration"
+  echo ""
+  echo "This wizard collects adopter-specific settings (source database, KPIs, map layers, and migration jobs)."
+  echo "Your configuration is stored in:"
+  echo "  $CONFIG_FILE"
+  echo ""
+  echo "That YAML file is the single source of truth used to generate the operational DSP configuration files."
+  echo ""
+  echo "Ways to work with this file:"
+  echo "  • Use this wizard — step-by-step prompts write answers to the path above"
+  echo "  • Bring your own file — copy your adopter-config.yaml to that path, then run ./config.sh and choose 1 (reapply)"
+  echo "  • Edit manually — change the YAML in any editor, then run ./config.sh and choose 1 (reapply)"
+  echo ""
+  echo "If the file already exists, the menu below also offers guided edit (option 2) or start over from the template (option 3)."
+  echo ""
+}
+
 if [ "$#" -gt 0 ]; then
   error "Run ./config.sh with no arguments."
   exit 1
@@ -26,6 +45,7 @@ fi
 
 ensure_dotenv
 ensure_dsp_repositories --backend --frontend --job
+print_config_intro
 
 if [ -f "$CONFIG_FILE" ]; then
   echo ""

@@ -1,4 +1,5 @@
-# Usage: cp .env.example .env && ./setup.sh && ./start.sh
+# Usage: ./config.sh && ./setup.sh && ./start.sh
+# (.env is created automatically from .env.example on first script run)
 
 services:
   dsp-db:
