@@ -23,6 +23,7 @@ require_docker
 step_header 2 "Environment (.env)"
 ensure_dotenv
 reject_legacy_migration_env
+ensure_dsp_repositories --backend --frontend
 
 step_header 3 "Setup mode"
 prompt_setup_data_mode
@@ -58,9 +59,10 @@ if [ "$SETUP_MODE" = "demo" ]; then
   step_header 7 "Quickstart seed"
   apply_quickstart_seed
 
-  step_header 8 "GeoServer Exhibition (publish layers)"
+  step_header 8 "GeoServers (publish layers)"
   use_quickstart_layer_srids
   start_geoserver_exhibition "populate" ""
+  start_geoserver_download "populate"
 
   ok "Setup finished — demonstration data is ready on Docker volumes."
   echo ""
@@ -81,16 +83,8 @@ ensure_adopter_config
 
 step_header 5 "Migration job repository path"
 
-JOB_PATH="${DSP_JOB_MIGRATION_PATH:-../rer-dsp-job-data-migration}"
-JOB_ABS="$(resolve_path "$JOB_PATH")"
-
 if [ "$WILL_MIGRATE" = "true" ]; then
-  if [ ! -f "$JOB_ABS/Dockerfile" ]; then
-    error "Migration job not found at: $JOB_ABS"
-    error "Clone rer-dsp-job-data-migration or set DSP_JOB_MIGRATION_PATH in .env"
-    exit 1
-  fi
-  ok "Migration job found: $JOB_ABS"
+  ensure_dsp_repositories --job
 else
   info "Migration skipped — job repository check not required."
 fi
@@ -158,9 +152,10 @@ else
   info "Data migration skipped (option 3 — real adopter without ETL)."
 fi
 
-step_header 10 "GeoServer Exhibition (publish layers)"
+step_header 10 "GeoServers (publish layers)"
 
 start_geoserver_exhibition "populate" "$MIGRATION_CONFIG"
+start_geoserver_download "populate"
 
 ok "Setup finished — data is ready on Docker volumes."
 echo ""

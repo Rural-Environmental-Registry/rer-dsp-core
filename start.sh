@@ -21,26 +21,8 @@ reject_legacy_migration_env
 
 step_header 3 "Repository paths (backend / frontend)"
 
-BACKEND_PATH="${DSP_BACKEND_PATH:-../rer-dsp-backend}"
-FRONTEND_PATH="${DSP_FRONTEND_PATH:-../rer-dsp-frontend}"
-
 info "Resolving repository paths..."
-BACKEND_ABS="$(resolve_path "$BACKEND_PATH")"
-FRONTEND_ABS="$(resolve_path "$FRONTEND_PATH")"
-
-if [ ! -f "$BACKEND_ABS/Dockerfile" ]; then
-  error "Backend not found at: $BACKEND_ABS"
-  error "Clone rer-dsp-backend as a sibling or set DSP_BACKEND_PATH in .env"
-  exit 1
-fi
-ok "Backend found: $BACKEND_ABS"
-
-if [ ! -f "$FRONTEND_ABS/Dockerfile" ]; then
-  error "Frontend not found at: $FRONTEND_ABS"
-  error "Clone rer-dsp-frontend as a sibling or set DSP_FRONTEND_PATH in .env"
-  exit 1
-fi
-ok "Frontend found: $FRONTEND_ABS"
+ensure_dsp_repositories --backend --frontend
 
 step_header 4 "Installation config (UI labels, screens, KPIs)"
 
@@ -90,10 +72,11 @@ else
   info "Migration is not run by ./start.sh. Use ./setup.sh when you need to (re)migrate."
 fi
 
-step_header 8 "GeoServer Exhibition + application containers"
+step_header 8 "GeoServers + application containers"
 
 MIGRATION_CONFIG="$ROOT_DIR/config/Job-Data-Migration/application/application.yaml"
 start_geoserver_exhibition "up" "$MIGRATION_CONFIG"
+start_geoserver_download "up"
 
 info "Building and starting application containers..."
 docker compose --env-file .env up -d --build dsp-backend dsp-frontend

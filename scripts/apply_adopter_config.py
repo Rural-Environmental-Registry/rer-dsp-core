@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Any
 
 FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
-FIXED_WFS_BASE_URL = FIXED_WMS_BASE_URL.replace("/wms", "/wfs")
+# Downloads use GeoServer Download (separate from map Exhibition WMS).
+FIXED_WFS_BASE_URL = "http://localhost:22669/geoserver/dsp/wfs"
 HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 LAYER_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DESTINATION_SCHEMA = "dsp"
@@ -142,6 +143,37 @@ def ask_int_field(
         return value
 
 
+def ask_float_field(
+    label: str,
+    default: Any,
+    description: str,
+    used_in: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    while True:
+        print(f"\n  {label}")
+        print(f"  What: {description}")
+        print(f"  Used in: {used_in}")
+        raw = ask("  Value", default)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            print("\n  Enter a numeric value.")
+            continue
+        if not (value == value and abs(value) != float("inf")):
+            print("\n  Enter a finite numeric value.")
+            continue
+        if minimum is not None and value < minimum:
+            print(f"\n  Enter a value greater than or equal to {minimum}.")
+            continue
+        if maximum is not None and value > maximum:
+            print(f"\n  Enter a value less than or equal to {maximum}.")
+            continue
+        return value
+
+
 def ask_color_field(
     label: str,
     default: Any,
@@ -228,6 +260,247 @@ def reset_disabled_themes(
 
 def enabled_kpi_codes(theme_count: int) -> tuple[str, ...]:
     return ("area_of_interest",) + tuple(f"theme_{index}" for index in range(1, theme_count + 1))
+
+
+MAP_VIEW_MODES = ("territorial_bbox", "manual", "planet")
+PLANET_CENTER_LAT = 0.0
+PLANET_CENTER_LNG = 0.0
+PLANET_ZOOM = 0
+
+
+def is_source_table_placeholder(source_table: str) -> bool:
+    normalized = source_table.strip()
+    return not normalized or "<source_" in normalized or normalized == "source_schema.source_table"
+
+
+def is_territory_level_etl_configured(values: dict[str, Any], level: str) -> bool:
+    jobs = get(values, "etl", "jobs", default={}) or {}
+    if jobs.get(level) is False:
+        return False
+    source_table = str(get(values, "etl", level, "source_table", default=""))
+    return not is_source_table_placeholder(source_table)
+
+
+def is_level1_source_configured(values: dict[str, Any]) -> bool:
+    return is_territory_level_etl_configured(values, "level1")
+
+
+def is_territorial_bbox_viable(values: dict[str, Any]) -> bool:
+    """True when at least one territorial level can feed GET /territory/boundary-box."""
+    return any(
+        is_territory_level_etl_configured(values, level)
+        for level in ("level1", "level2", "level3")
+    )
+
+
+TERRITORIAL_BBOX_PLANET_REASON = (
+    "Territorial geometry cannot be resolved from the ETL configuration "
+    "(no enabled level1/level2/level3 source table)."
+)
+
+
+def coerce_map_initial_view_to_planet(values: dict[str, Any]) -> bool:
+    """Switch territorial_bbox to planet when the frontend would fall back to the globe."""
+    initial_view = get(values, "map", "initial_view", default={}) or {}
+    if initial_view.get("mode") != "territorial_bbox":
+        return False
+    if is_territorial_bbox_viable(values):
+        return False
+
+    map_config = values.setdefault("map", {})
+    initial_view = map_config.setdefault("initial_view", {})
+    initial_view["mode"] = "planet"
+    initial_view["latitude"] = None
+    initial_view["longitude"] = None
+    initial_view["zoom"] = None
+
+    print()
+    print("  Map initial view: adjusted automatically.")
+    print(f"  {TERRITORIAL_BBOX_PLANET_REASON}")
+    print("  Changed map.initial_view.mode from 'territorial_bbox' to 'planet'.")
+    return True
+
+
+def _initial_view_coordinate_fields(initial_view: dict[str, Any]) -> dict[str, Any]:
+    return {
+        name: initial_view.get(name)
+        for name in ("latitude", "longitude", "zoom")
+    }
+
+
+def _has_any_coordinate_field(fields: dict[str, Any]) -> bool:
+    return any(
+        value is not None and not (isinstance(value, str) and not value.strip())
+        for value in fields.values()
+    )
+
+
+def _build_initial_view_json(
+    mode: str,
+    *,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    zoom: int | None = None,
+) -> dict[str, Any]:
+    return {
+        "initialView": {
+            "mode": mode,
+            "latitude": latitude,
+            "longitude": longitude,
+            "zoom": zoom,
+        }
+    }
+
+
+def validate_map_initial_view(values: dict[str, Any]) -> dict[str, Any]:
+    """Validate map.initial_view and return the installation map block."""
+    initial_view = get(values, "map", "initial_view", default={}) or {}
+    mode = initial_view.get("mode")
+    if not isinstance(mode, str) or mode not in MAP_VIEW_MODES:
+        raise ValueError(
+            "map.initial_view.mode is required and must be one of: "
+            + ", ".join(MAP_VIEW_MODES)
+            + "."
+        )
+
+    coordinate_fields = _initial_view_coordinate_fields(initial_view)
+    has_coordinates = _has_any_coordinate_field(coordinate_fields)
+
+    if mode in ("territorial_bbox", "planet"):
+        if has_coordinates:
+            raise ValueError(
+                f"map.initial_view.latitude, longitude, and zoom must be null when "
+                f"mode is '{mode}'."
+            )
+        return _build_initial_view_json(mode)
+
+    latitude = coordinate_fields["latitude"]
+    longitude = coordinate_fields["longitude"]
+    zoom = coordinate_fields["zoom"]
+    if not has_coordinates or any(
+        value is None or (isinstance(value, str) and not value.strip())
+        for value in coordinate_fields.values()
+    ):
+        raise ValueError(
+            "map.initial_view requires latitude, longitude, and zoom when mode is 'manual'."
+        )
+
+    try:
+        lat = float(latitude)
+        lng = float(longitude)
+        zoom_value = int(zoom)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "map.initial_view latitude and longitude must be numbers; zoom must be an integer."
+        ) from exc
+
+    if not (-90 <= lat <= 90):
+        raise ValueError("map.initial_view.latitude must be between -90 and 90.")
+    if not (-180 <= lng <= 180):
+        raise ValueError("map.initial_view.longitude must be between -180 and 180.")
+    if not (0 <= zoom_value <= 16):
+        raise ValueError("map.initial_view.zoom must be an integer between 0 and 16.")
+
+    return _build_initial_view_json(
+        "manual",
+        latitude=lat,
+        longitude=lng,
+        zoom=zoom_value,
+    )
+
+
+def ask_map_initial_view(config: dict[str, Any]) -> None:
+    """Configure the home map initial view mode."""
+    map_config = config.setdefault("map", {})
+    initial_view = map_config.setdefault(
+        "initial_view",
+        {
+            "mode": "territorial_bbox",
+            "latitude": None,
+            "longitude": None,
+            "zoom": None,
+        },
+    )
+
+    print("\n  Initial map view")
+    print("  What: Controls how the home map opens and returns to its default view")
+    print("        (Center map tool and Clear search on the home page).")
+    print("  Used in: the home page map")
+    print()
+    print("  Choose one mode:")
+    print("    1. territorial_bbox — automatic framing from migrated L1/L2/L3 geometries")
+    print("    2. manual — fixed latitude, longitude, and zoom")
+    print("    3. planet — always show the whole world (zoomed out)")
+    print()
+    print("  If territorial_bbox is selected but no territorial level (L1/L2/L3) is")
+    print("  configured in the ETL, the mode will be set to 'planet' automatically")
+    print("  when configuration is applied (same view the frontend would use as fallback).")
+
+    current_mode = initial_view.get("mode", "territorial_bbox")
+    if current_mode not in MAP_VIEW_MODES:
+        current_mode = "territorial_bbox"
+
+    while True:
+        print(f"\n  Current mode: {current_mode}")
+        choice = ask("  Mode (1=territorial_bbox, 2=manual, 3=planet)", {
+            "territorial_bbox": "1",
+            "manual": "2",
+            "planet": "3",
+        }.get(current_mode, "1"))
+        if choice == "1":
+            selected_mode = "territorial_bbox"
+            break
+        if choice == "2":
+            selected_mode = "manual"
+            break
+        if choice == "3":
+            selected_mode = "planet"
+            break
+        print("\n  Enter 1, 2, or 3.")
+
+    initial_view["mode"] = selected_mode
+
+    if selected_mode == "territorial_bbox":
+        initial_view["latitude"] = None
+        initial_view["longitude"] = None
+        initial_view["zoom"] = None
+        if not is_territorial_bbox_viable(config):
+            print()
+            print("  Note: no territorial level (L1/L2/L3) is configured in the ETL yet.")
+            print("  If that remains true after the wizard, map.initial_view.mode will be")
+            print("  changed to 'planet' automatically when configuration is applied.")
+        return
+
+    if selected_mode == "planet":
+        initial_view["latitude"] = None
+        initial_view["longitude"] = None
+        initial_view["zoom"] = None
+        return
+
+    initial_view["latitude"] = ask_float_field(
+        "Initial center latitude",
+        initial_view.get("latitude", -14.2),
+        "Decimal degrees between -90 and 90. Example: -14.2 for central Brazil.",
+        "the map center on load and when resetting the view",
+        minimum=-90,
+        maximum=90,
+    )
+    initial_view["longitude"] = ask_float_field(
+        "Initial center longitude",
+        initial_view.get("longitude", -51.9),
+        "Decimal degrees between -180 and 180. Example: -51.9 for central Brazil.",
+        "the map center on load and when resetting the view",
+        minimum=-180,
+        maximum=180,
+    )
+    initial_view["zoom"] = ask_int_field(
+        "Initial zoom level",
+        initial_view.get("zoom", 10),
+        "Whole number from 0 (world) to 16 (closest). Higher values zoom in more.",
+        "the map framing on load and when resetting the view",
+        minimum=0,
+        maximum=16,
+    )
 
 
 def ask_kpi_accent_colors(config: dict[str, Any], theme_count: int) -> None:
@@ -679,9 +952,10 @@ def ask_generic_layer_entry(
     entry = copy.deepcopy(entry) if entry else {}
 
     while True:
+        default_source = entry.get("source_table") or "public.my_layer"
         source_table = str(
             ask_field(
-                "Source table", entry.get("source_table", ""),
+                "Source table", default_source,
                 "Origin table (schema.table). Destination is always dsp.<table> — do not use schema 'dsp'.",
                 "the migration job (reads from your source database)",
             )
@@ -926,7 +1200,9 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
     ask_screen_text_fields(screens)
     theme_count = ask_int_field(
         "Number of theme KPIs (0-4)", config["installation"]["kpis"]["theme_count"],
-        "Number of optional theme measurements available in the source data.",
+        "Number of optional theme measurements available in the source data. "
+        "The Area of Interest (AOI) KPI is always present — this value only "
+        "controls additional theme KPIs (use 0 when there are no theme columns).",
         "generated KPI cards and ETL theme mappings",
         minimum=0,
         maximum=4,
@@ -978,6 +1254,7 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
     print("Stage 3/5 — KPI colors and map layers")
     print("=" * 72)
     ask_kpi_accent_colors(config, theme_count)
+    ask_map_initial_view(config)
     group_names = config["map"]["group_names"]
     group_names["territorial_division"] = ask_field(
         "Map group name — territorial division", group_names["territorial_division"],
@@ -1233,6 +1510,9 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
                 f"map.layers.{layer_name}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
             )
     extra_layers = validate_extra_layers(values)
+    if coerce_map_initial_view_to_planet(values):
+        active.write_text(dump_yaml(values), encoding="utf-8")
+    map_initial_view = validate_map_initial_view(values)
     kpis = get(values, "installation", "kpis", default={})
     for code in enabled_kpi_codes(theme_count):
         accent_color = get(kpis, code, "accent_color")
@@ -1297,6 +1577,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     installation["formats"]["dateTime"] = formats.get(
         "date_time", installation["formats"]["dateTime"]
     )
+    installation["map"] = map_initial_view
     install_file = root / "config/installation/installation-config.json"
     install_file.write_text(
         json.dumps(installation, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

@@ -50,7 +50,7 @@ installation:
       level2_section_title: Options for the selected continent
       filter_by_title: "Filter by:"
   kpis:
-    # Number of theme KPIs available in the source database (0 to 4).
+    # Optional theme KPIs in the source database (0 to 4). AOI KPI always exists.
     theme_count: 4
     area_of_interest:
       label: Registered properties
@@ -85,6 +85,17 @@ installation:
     date_time: dd/MM/yyyy HH:mm
 
 map:
+  # Initial home map view (opening, Center tool, Clear search).
+  # mode: territorial_bbox | manual | planet
+  # - territorial_bbox: frame from migrated L1/L2/L3; ./config.sh sets planet automatically
+  #   when no territorial ETL level (L1/L2/L3) is configured
+  # - manual: fixed latitude/longitude/zoom (required below)
+  # - planet: always show the whole world (center 0,0 zoom 0)
+  initial_view:
+    mode: territorial_bbox
+    latitude: null
+    longitude: null
+    zoom: null
   # Fixed groups (dt / ird) plus any extra keys used by etl.layers[].group_key.
   group_names:
     territorial_division: Territorial division
@@ -169,7 +180,7 @@ etl:
     theme_4_column: <source_theme_4>
     where_clause: "1=1"
   # Extra geographic layers (generic). Each item migrates to dsp.<table> on
-  # exhibition-db, is published to GeoServer, and appears in the map panel.
+  # geoserver-db, is published to GeoServer, and appears in the map panel.
   # Presentation and ETL share one entry to avoid drift. Leave empty when unused.
   # Filled by ./config.sh (stage 5) or edited here directly.
   #

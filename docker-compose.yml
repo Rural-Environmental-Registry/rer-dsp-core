@@ -23,19 +23,19 @@ services:
     networks:
       - dsp_network
 
-  dsp-geoserver-exhibition-db:
+  dsp-geoserver-db:
     image: postgis/postgis:16-3.4
-    container_name: dsp-geoserver-exhibition-db
+    container_name: dsp-geoserver-db
     restart: unless-stopped
     ports:
-      - "${DSP_GEOSERVER_EXHIBITION_DB_HOST_PORT:-20656}:5432"
+      - "${DSP_GEOSERVER_DB_HOST_PORT:-20656}:5432"
     environment:
-      POSTGRES_DB: ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}
-      POSTGRES_USER: ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}
-      POSTGRES_PASSWORD: ${DSP_GEOSERVER_EXHIBITION_DB_PASSWORD:-dsp_geo}
+      POSTGRES_DB: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
+      POSTGRES_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      POSTGRES_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
     volumes:
-      - dsp_geoserver_exhibition_db_data:/var/lib/postgresql/data
-      - ./config/db/dsp-geoserver-exhibition-db:/docker-entrypoint-initdb.d:ro
+      - dsp_geoserver_db_data:/var/lib/postgresql/data
+      - ./config/db/dsp-geoserver-db:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -99,7 +99,7 @@ services:
     depends_on:
       dsp-db:
         condition: service_healthy
-      dsp-geoserver-exhibition-db:
+      dsp-geoserver-db:
         condition: service_healthy
       dsp-job-migration-db:
         condition: service_healthy
@@ -128,7 +128,7 @@ services:
       DSP_INSTALLATION_CONFIG_FILE: ${DSP_INSTALLATION_CONFIG_FILE:-file:/config/installation-config.json}
       DSP_MAP_LAYERS_FILE: ${DSP_MAP_LAYERS_FILE:-file:/config/mapLayersConfig.json}
       DSP_DOWNLOAD_THEMES_FILE: ${DSP_DOWNLOAD_THEMES_FILE:-file:/config/downloadThemesConfig.json}
-      DSP_GEOSERVER_WFS_BASE_URL: ${DSP_GEOSERVER_WFS_BASE_URL:-http://dsp-geoserver-exhibition:8080/geoserver/dsp/wfs}
+      DSP_GEOSERVER_WFS_BASE_URL: ${DSP_GEOSERVER_WFS_BASE_URL:-http://dsp-geoserver-download:8080/geoserver/dsp/wfs}
       SPRING_DATASOURCE_URL: jdbc:postgresql://dsp-db:5432/${DSP_DB_NAME:-dsp-db}
       SPRING_DATASOURCE_USERNAME: ${DSP_DB_USER:-dsp}
       SPRING_DATASOURCE_PASSWORD: ${DSP_DB_PASSWORD:-dsp}
@@ -163,14 +163,14 @@ services:
       CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,HEAD,OPTIONS
       CORS_ALLOWED_HEADERS: "*"
       GEOSERVER_URL: http://localhost:8080/geoserver
-      DB_HOST: dsp-geoserver-exhibition-db
+      DB_HOST: dsp-geoserver-db
       DB_PORT: "5432"
-      DB_NAME: ${DSP_GEOSERVER_EXHIBITION_DB_NAME:-dsp-geoserver-exhibition-db}
+      DB_NAME: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
       DB_SCHEMA: dsp
-      DB_USER: ${DSP_GEOSERVER_EXHIBITION_DB_USER:-dsp_geo}
-      DB_PASSWORD: ${DSP_GEOSERVER_EXHIBITION_DB_PASSWORD:-dsp_geo}
+      DB_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      DB_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
       WORKSPACE_NAME: dsp
-      DATASTORE_NAME: dsp-geoserver-exhibition-db
+      DATASTORE_NAME: dsp-geoserver-db
       MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
       LAYER_SRS_TERRITORY_LEVEL_1: ${LAYER_SRS_TERRITORY_LEVEL_1}
       LAYER_SRS_TERRITORY_LEVEL_2: ${LAYER_SRS_TERRITORY_LEVEL_2}
@@ -180,7 +180,53 @@ services:
       - dsp_geoserver_exhibition_data:/var/geoserver/datadir
       - ./config/map/mapLayersConfig.json:/config/mapLayersConfig.json:ro
     depends_on:
-      dsp-geoserver-exhibition-db:
+      dsp-geoserver-db:
+        condition: service_healthy
+    networks:
+      - dsp_network
+
+  dsp-geoserver-download:
+    image: dsp-geoserver-download:local
+    build:
+      context: ./config/GeoserverDownload/docker
+      dockerfile: Dockerfile
+      network: host
+    container_name: dsp-geoserver-download
+    restart: unless-stopped
+    ports:
+      - "${DSP_GEOSERVER_DOWNLOAD_HOST_PORT:-22669}:8080"
+    environment:
+      GEOSERVER_DATA_DIR: /var/geoserver/datadir
+      RUN_UNPRIVILEGED: "true"
+      RUN_WITH_USER_UID: "999"
+      RUN_WITH_USER_GID: "999"
+      CHANGE_OWNERSHIP_ON_FOLDERS: /opt /var/geoserver/datadir /usr/local/tomcat/temp /usr/local/tomcat/work /usr/local/tomcat/logs
+      GEOSERVER_ADMIN_USER: ${DSP_GEOSERVER_ADMIN_USER:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      GEOSERVER_CSRF_DISABLED: "true"
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "*"
+      CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,HEAD,OPTIONS
+      CORS_ALLOWED_HEADERS: "*"
+      GEOSERVER_URL: http://localhost:8080/geoserver
+      DB_HOST: dsp-geoserver-db
+      DB_PORT: "5432"
+      DB_NAME: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
+      DB_SCHEMA: dsp
+      DB_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      DB_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
+      WORKSPACE_NAME: dsp
+      DATASTORE_NAME: dsp-geoserver-download-db
+      MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
+      LAYER_SRS_TERRITORY_LEVEL_1: ${LAYER_SRS_TERRITORY_LEVEL_1}
+      LAYER_SRS_TERRITORY_LEVEL_2: ${LAYER_SRS_TERRITORY_LEVEL_2}
+      LAYER_SRS_TERRITORY_LEVEL_3: ${LAYER_SRS_TERRITORY_LEVEL_3}
+      LAYER_SRS_AREA_OF_INTEREST: ${LAYER_SRS_AREA_OF_INTEREST}
+    volumes:
+      - dsp_geoserver_download_data:/var/geoserver/datadir
+      - ./config/map/mapLayersConfig.json:/config/mapLayersConfig.json:ro
+    depends_on:
+      dsp-geoserver-db:
         condition: service_healthy
     networks:
       - dsp_network
@@ -209,6 +255,7 @@ networks:
 
 volumes:
   dsp_db_data:
-  dsp_geoserver_exhibition_db_data:
+  dsp_geoserver_db_data:
   dsp_job_migration_db_data:
   dsp_geoserver_exhibition_data:
+  dsp_geoserver_download_data:
