@@ -1120,9 +1120,11 @@ def ask_data_preparation_flow() -> bool:
 
 
 def ask_existing_config_file(active: Path) -> bool:
-    print("\nDo you already have an adopter configuration file?")
-    print("  1. No — create one with this guided wizard")
-    print("  2. Yes — I will copy my file to the expected location")
+    print("\nHow do you want to configure the adopter?")
+    print("  1. Guided configuration")
+    print("     Create adopter-config.yaml step by step.")
+    print("  2. Existing configuration")
+    print("     Use an existing adopter-config.yaml file.")
 
     while True:
         choice = ask("Choice", "1")
