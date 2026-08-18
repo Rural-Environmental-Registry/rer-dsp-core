@@ -181,6 +181,26 @@ detect_geometry_kind() {
   echo "$kind"
 }
 
+# Tables created by the job (AOI and extra layers) may not yet exist in option 3.
+table_exists() {
+  local table_name=$1
+  local found
+
+  if ! command -v psql >/dev/null 2>&1; then
+    return 0
+  fi
+
+  found=$(PGPASSWORD="${DB_PASSWORD}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" -Atqc "
+    SELECT 1
+      FROM information_schema.tables
+     WHERE table_schema = '${DB_SCHEMA}'
+       AND table_name = '${table_name}'
+     LIMIT 1;
+  " 2>/dev/null || true)
+
+  [ "$found" = "1" ]
+}
+
 build_point_sld() {
   local style_name=$1
   local stroke_color=$2
@@ -546,6 +566,12 @@ sync_layer_from_config() {
   local style_tsv stroke_color fill_color geom_kind sld
 
   table_name=$(resolve_native_name "$wms_id")
+  if ! table_exists "$table_name"; then
+    echo "Skipping '${wms_id}': table ${DB_SCHEMA}.${table_name} does not exist yet (run migration, then populate again)."
+    SKIPPED_LAYERS=$((SKIPPED_LAYERS + 1))
+    return 0
+  fi
+
   style_name="dsp_${layer_name//-/_}"
   stroke_width=$(resolve_stroke_width "$wms_id")
   srs=$(resolve_srs "$wms_id")
@@ -570,6 +596,8 @@ sync_layer_from_config() {
   publish_layer "$layer_name" "$table_name" "$style_name" "$srs"
 }
 
+SKIPPED_LAYERS=0
+
 echo "=== DSP GeoServer Exhibition populate ==="
 echo "URL: ${GEOSERVER_URL}"
 echo "DB:  ${DB_HOST}:${DB_PORT}/${DB_NAME} schema=${DB_SCHEMA}"
@@ -593,4 +621,7 @@ done
 
 echo ""
 echo "Done. WMS: ${GEOSERVER_URL}/${WORKSPACE_NAME}/wms"
-echo "Published ${#WMS_IDS[@]} layer(s) from mapLayersConfig.json"
+echo "Published $(( ${#WMS_IDS[@]} - SKIPPED_LAYERS )) of ${#WMS_IDS[@]} layer(s) from mapLayersConfig.json"
+if [ "$SKIPPED_LAYERS" -gt 0 ]; then
+  echo "Skipped ${SKIPPED_LAYERS} layer(s) whose table does not exist yet."
+fi
