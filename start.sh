@@ -51,7 +51,7 @@ step_header 6 "Confirmation"
 
 if is_continuous_migration_mode; then
   info "Continuous migration mode — ./start.sh will keep the migration stack running."
-  info "Re-syncs are triggered externally (not scheduled by this repo)."
+  info "The job container re-syncs automatically every ${DSP_MIGRATION_SYNC_INTERVAL:-1h}."
 else
   info "This script starts the application stack only (no data migration)."
 fi

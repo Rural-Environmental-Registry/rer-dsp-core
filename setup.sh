@@ -145,8 +145,9 @@ if [ "$WILL_MIGRATE" = "true" ]; then
   ok "Initial migration finished"
   set_env_var "DSP_MIGRATION_EXECUTION_MODE" "${MIGRATION_EXECUTION_MODE:-once}"
   if [ "${MIGRATION_EXECUTION_MODE:-once}" = "continuous" ]; then
+    set_env_var "DSP_MIGRATION_SYNC_INTERVAL" "${MIGRATION_SYNC_INTERVAL:-1h}"
     start_migration_service_stack
-    ok "Migration service stack is running for external scheduling"
+    ok "Migration service stack is running (periodic sync every ${MIGRATION_SYNC_INTERVAL:-1h})"
   fi
 else
   info "Data migration skipped (option 3 — real adopter without ETL)."

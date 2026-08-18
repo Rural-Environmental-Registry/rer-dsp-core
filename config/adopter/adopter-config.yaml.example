@@ -144,6 +144,7 @@ etl:
   #   parent_key: parent_shape_id
   #   name_column: nome
   #   geometry_column: geom
+  #   updated_at_column: data_atualizacao
   #
   # After editing SQL here, run: ./config.sh
   level1:
@@ -151,6 +152,7 @@ etl:
     primary_key: <source_pk>
     name_column: <source_name>
     geometry_column: <source_geom>
+    updated_at_column: <source_updated_at>
     where_clause: "1=1"
   level2:
     source_table: <source_schema>.<source_table>
@@ -158,6 +160,7 @@ etl:
     parent_key: <source_parent_pk>
     name_column: <source_name>
     geometry_column: <source_geom>
+    updated_at_column: <source_updated_at>
     where_clause: "1=1"
   level3:
     source_table: <source_schema>.<source_table>
@@ -165,6 +168,7 @@ etl:
     parent_key: <source_parent_pk>
     name_column: <source_name>
     geometry_column: <source_geom>
+    updated_at_column: <source_updated_at>
     where_clause: "1=1"
   area_of_interest:
     source_table: <source_schema>.<source_table>
@@ -174,6 +178,11 @@ etl:
     updated_at_column: <source_updated_at>
     territory_level_3_column: <source_territory_level_3_fk>
     area_column: <source_area>
+    # Extra source columns copied as-is to both destinations (optional).
+    # YAML list, e.g. [owner, status, year]. Empty [] when none.
+    persist_columns: []
+    # KPI columns (dsp-db only). Destination keeps the source name — use
+    # theme_1..theme_4 as the column or subquery alias to feed the KPI cards.
     theme_1_column: <source_theme_1>
     theme_2_column: <source_theme_2>
     theme_3_column: <source_theme_3>
@@ -186,7 +195,12 @@ etl:
   #
   #   layers:
   #     - source_table: <schema>.<table>   # origin schema (e.g. public) — never dsp
-  #       parent_key: <source_parent_pk>  # AOI parent_key (e.g. aeroporto_id)
+  #       parent_key: <source_parent_pk>   # AOI FK (e.g. aeroporto_id)
+  #       primary_key: <source_pk>
+  #       updated_at_column: <source_updated_at>
+  #       label_column: <source_name>
+  #       geometry_column: <source_geom>
+  #       persist_columns: []              # optional extras, e.g. [owner, status]
   #       layer_name: <wms_id>             # technical id (lowercase, hyphens ok)
   #       srid: 4674
   #       enabled: true

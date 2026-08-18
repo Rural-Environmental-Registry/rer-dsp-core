@@ -1,5 +1,5 @@
 # Generic application.yaml template — edit application.yaml with your adopter source and ETL mapping.
-# Guide: docs/migration-config.md
+# Generated from adopter-config.yaml by ./config.sh.
 
 spring:
   application:
@@ -55,27 +55,32 @@ server:
   port: 8086
 
 batch:
+  # Product default for TIMESTAMP/DATE watermark columns without offset.
+  # Ignored when the source column is timestamptz. Override only when naive
+  # timestamps are stored in another zone (e.g. America/Santiago).
+  source-timezone: America/Sao_Paulo
   admin-unit:
     # Adopter territorial hierarchy: L1 → L2 → L3 (parent_id links to the parent level).
+    # Change detection is watermark-only (updated-at-column).
     level-1:
       # Source table or SQL subquery. Replace the placeholders.
       source-table: <source_schema>.<source_table>
       target-table: dsp.territory_level_1
       primary-key: <source_pk>
       geometry-column: <source_geom>
+      updated-at-column: <source_updated_at>
       where-clause: "1=1"
-      comparison-columns:
-        - <source_name>
       persist-columns:
         - <source_pk>
         - <source_name>
+        - <source_updated_at>
       column-mapping:
         <source_pk>: id
         <source_name>: name
-        <source_geom>: geometry
+        <source_geom>: geom
+        <source_updated_at>: updated_at
       layer-name: territory-level-1
       srid: ${LAYER_SRS_TERRITORY_LEVEL_1:4326}
-      change-detection-strategy: DEFAULT
     level-2:
       source-table: <source_schema>.<source_table>
       target-table: dsp.territory_level_2
@@ -83,86 +88,92 @@ batch:
       # Column used to partition the job in parallel (usually the parent).
       partition-column: <source_parent_pk>
       geometry-column: <source_geom>
+      updated-at-column: <source_updated_at>
       where-clause: "1=1"
-      comparison-columns:
-        - <source_name>
-        - <source_parent_pk>
       persist-columns:
         - <source_pk>
         - <source_name>
         - <source_parent_pk>
+        - <source_updated_at>
       column-mapping:
         <source_pk>: id
         <source_name>: name
         <source_parent_pk>: parent_id
-        <source_geom>: geometry
+        <source_geom>: geom
+        <source_updated_at>: updated_at
       layer-name: territory-level-2
       srid: ${LAYER_SRS_TERRITORY_LEVEL_2:4326}
-      change-detection-strategy: DEFAULT
     level-3:
       source-table: <source_schema>.<source_table>
       target-table: dsp.territory_level_3
       primary-key: <source_pk>
       partition-column: <source_parent_pk>
       geometry-column: <source_geom>
+      updated-at-column: <source_updated_at>
       where-clause: "1=1"
-      comparison-columns:
-        - <source_name>
-        - <source_parent_pk>
       persist-columns:
         - <source_pk>
         - <source_name>
         - <source_parent_pk>
+        - <source_updated_at>
       column-mapping:
         <source_pk>: id
         <source_name>: name
         <source_parent_pk>: parent_id
-        <source_geom>: geometry
+        <source_geom>: geom
+        <source_updated_at>: updated_at
       layer-name: territory-level-3
       srid: ${LAYER_SRS_TERRITORY_LEVEL_3:4326}
-      change-detection-strategy: DEFAULT
   area-of-interest:
-    # Entities of interest linked to territory_level_3 (FK).
-    # Optional: subquery that computes measures → theme_1..theme_4 (dsp-db only).
+    # Job creates dsp.area_of_interest on dsp-db and geo-target (canonical
+    # columns + optional extras). Canonical source columns map to fixed names:
+    #   primary-key → id
+    #   creation-date-column → registration_date
+    #   updated-at-column → updated_at
+    #   commune-id-column → territory_level_3_id
+    #   total-area-column → area
+    #   geometry-column → geom
+    # persist-columns: extras only (same name on both destinations).
+    # business-only-persist-columns: KPI columns, dsp-db only (same name on target).
+    # To fill theme_1..theme_4, the source column or subquery alias must already
+    # be named theme_N — the job does not rename extras.
     source-table: <source_schema>.<source_table>
     target-table: dsp.area_of_interest
     primary-key: <source_pk>
+    creation-date-column: <source_created_at>
+    updated-at-column: <source_updated_at>
+    commune-id-column: <source_territory_level_3_fk>
+    total-area-column: <source_area>
     geometry-column: <source_geom>
     where-clause: "1=1"
-    # Columns compared for change detection (geoserver-db). Do not list themes here.
-    comparison-columns:
-      - <source_updated_at>
-      - <source_territory_level_3_fk>
-      - <source_area>
-    persist-columns:
-      - <source_pk>
-      - <source_created_at>
-      - <source_updated_at>
-      - <source_territory_level_3_fk>
-      - <source_area>
-    # Written only to dsp-db (not geoserver-db). Remove if you have no theme KPIs.
+    persist-columns: []
     business-only-persist-columns:
       - <source_theme_1>
       - <source_theme_2>
       - <source_theme_3>
       - <source_theme_4>
-    column-mapping:
-      <source_pk>: id
-      <source_created_at>: registration_date
-      <source_updated_at>: alteration_date
-      <source_territory_level_3_fk>: territory_level_3_id
-      <source_area>: area
-      <source_geom>: geometry
-      <source_theme_1>: theme_1
-      <source_theme_2>: theme_2
-      <source_theme_3>: theme_3
-      <source_theme_4>: theme_4
     layer-name: area-of-interest
     srid: ${LAYER_SRS_AREA_OF_INTEREST:4326}
-    change-detection-strategy: DEFAULT
   # Generic layers: job creates dsp.<table> on geo-target automatically.
-  # parent_key (AOI parent_key) becomes area_of_interest_id on the target.
+  # Canonical source columns map to fixed target names:
+  #   primary-key → id
+  #   area-of-interest-id-column → area_of_interest_id
+  #   updated-at-column → updated_at
+  #   label-column → label
+  #   geometry-column → geom
   # Generated from adopter-config etl.layers by ./config.sh.
+  # Example (commented — filled by ./config.sh):
+  # layers:
+  #   - source-table: conservation.mixed_geometries
+  #     primary-key: feature_id
+  #     area-of-interest-id-column: conservation_unit_id
+  #     updated-at-column: updated_at
+  #     label-column: name
+  #     geometry-column: boundary
+  #     layer-name: mixed_geometries
+  #     srid: 4674
+  #     where-clause: "1=1"
+  #     enabled: true
   layers: []
 
 parallelization:
@@ -202,4 +213,3 @@ execution-jobs:
 logging:
   level:
     br.car.dsp_batch: INFO
-    br.car.dsp_batch.batch.strategy: INFO
