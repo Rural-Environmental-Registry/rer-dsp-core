@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS dsp.territory_level_1 (
     id                   VARCHAR(64) PRIMARY KEY,
     name                 VARCHAR(255) NOT NULL,
     boundary_box         geometry(Polygon),
-    centroid_coordinates geometry(Point)
+    centroid_coordinates geometry(Point),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS dsp.territory_level_2 (
@@ -17,7 +18,8 @@ CREATE TABLE IF NOT EXISTS dsp.territory_level_2 (
     name                 VARCHAR(255) NOT NULL,
     parent_id            VARCHAR(64) REFERENCES dsp.territory_level_1 (id),
     boundary_box         geometry(Polygon),
-    centroid_coordinates geometry(Point)
+    centroid_coordinates geometry(Point),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS dsp.territory_level_3 (
@@ -25,13 +27,16 @@ CREATE TABLE IF NOT EXISTS dsp.territory_level_3 (
     name                 VARCHAR(255) NOT NULL,
     parent_id            VARCHAR(64) REFERENCES dsp.territory_level_2 (id),
     boundary_box         geometry(Polygon),
-    centroid_coordinates geometry(Point)
+    centroid_coordinates geometry(Point),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_territory_level_1_boundary_box
     ON dsp.territory_level_1 USING GIST (boundary_box);
 CREATE INDEX IF NOT EXISTS idx_territory_level_1_centroid_coordinates
     ON dsp.territory_level_1 USING GIST (centroid_coordinates);
+CREATE INDEX IF NOT EXISTS idx_territory_level_1_updated_at
+    ON dsp.territory_level_1 (updated_at);
 
 CREATE INDEX IF NOT EXISTS idx_territory_level_2_boundary_box
     ON dsp.territory_level_2 USING GIST (boundary_box);
@@ -39,13 +44,17 @@ CREATE INDEX IF NOT EXISTS idx_territory_level_2_centroid_coordinates
     ON dsp.territory_level_2 USING GIST (centroid_coordinates);
 CREATE INDEX IF NOT EXISTS idx_territory_level_2_parent_id
     ON dsp.territory_level_2 (parent_id);
-
+CREATE INDEX IF NOT EXISTS idx_territory_level_2_updated_at
+    ON dsp.territory_level_2 (updated_at);
+    
 CREATE INDEX IF NOT EXISTS idx_territory_level_3_boundary_box
     ON dsp.territory_level_3 USING GIST (boundary_box);
 CREATE INDEX IF NOT EXISTS idx_territory_level_3_centroid_coordinates
     ON dsp.territory_level_3 USING GIST (centroid_coordinates);
 CREATE INDEX IF NOT EXISTS idx_territory_level_3_parent_id
     ON dsp.territory_level_3 (parent_id);
+CREATE INDEX IF NOT EXISTS idx_territory_level_3_updated_at
+    ON dsp.territory_level_3 (updated_at);
 
 COMMENT ON SCHEMA dsp IS 'DSP RER operational schema';
 COMMENT ON TABLE dsp.territory_level_1 IS 'Level 1 (e.g. region)';

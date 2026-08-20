@@ -7,9 +7,9 @@ Static SQL that populates `dsp-db` and `dsp-geoserver-db` without a JDBC source 
 | File | Target |
 | --- | --- |
 | `01_territory_dsp.sql` | `dsp.territory_level_*` on dsp-db (bbox + centroid) |
-| `01_territory_exhibition.sql` | same tables on geoserver-db (`geometry`) |
-| `02_aoi_dsp.sql` | `dsp.area_of_interest` on dsp-db (+ themes) |
-| `02_aoi_exhibition.sql` | AOI on geoserver-db |
+| `01_territory_exhibition.sql` | same tables on exhibition-db (`geom`) |
+| `02_aoi_dsp.sql` | Creates (demo only) and loads `dsp.area_of_interest` on dsp-db (+ themes) |
+| `02_aoi_exhibition.sql` | Creates (demo only) and loads AOI on geoserver-db |
 
 ## Hierarchy
 
@@ -32,6 +32,8 @@ Static SQL that populates `dsp-db` and `dsp-geoserver-db` without a JDBC source 
 ## Usage
 
 Applied by `./setup.sh` when you choose option **1** (demonstration).
+
+Adopter installs create `dsp.area_of_interest` via the migration job, not core init SQL. These seed files therefore include the demo `CREATE TABLE` so option 1 can load AOI without JDBC. The demo column is still `alteration_date` (current backend mapping); switch to `updated_at` when the backend is aligned.
 
 The quickstart `installation-config.json` uses **`map.initialView.mode: manual`** (center Brazil, zoom 4) so the home map always opens framed on the demo territory without depending on `GET /territory/boundary-box` at first load.
 

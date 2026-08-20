@@ -1,7 +1,7 @@
 -- Quickstart seed: territory levels for dsp-db (demo only, SRID 4674).
 -- Do not use in production. Geometries are heavily simplified.
 -- Neighbouring boundaries are shared: states touch without gaps or overlaps.
-TRUNCATE dsp.area_of_interest, dsp.territory_level_3, dsp.territory_level_2, dsp.territory_level_1 CASCADE;
+TRUNCATE dsp.territory_level_3, dsp.territory_level_2, dsp.territory_level_1 CASCADE;
 
 INSERT INTO dsp.territory_level_1 (id, name, boundary_box, centroid_coordinates) VALUES
   ('BR', 'Brazil', ST_MakeEnvelope(-73.9475, -33.7438, -34.7945, 5.2718, 4674), ST_SetSRID(ST_Point(-53.0738, -10.7800), 4674));
