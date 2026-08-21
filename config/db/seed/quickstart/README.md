@@ -33,7 +33,7 @@ Static SQL that populates `dsp-db` and `dsp-geoserver-db` without a JDBC source 
 
 Applied by `./setup.sh` when you choose option **1** (demonstration).
 
-Adopter installs create `dsp.area_of_interest` via the migration job, not core init SQL. These seed files therefore include the demo `CREATE TABLE` so option 1 can load AOI without JDBC. The demo column is still `alteration_date` (current backend mapping); switch to `updated_at` when the backend is aligned.
+Adopter installs create `dsp.area_of_interest` via the migration job, not core init SQL. These seed files therefore include the demo `CREATE TABLE` so option 1 can load AOI without JDBC. The last-update column is `updated_at`.
 
 The quickstart `installation-config.json` uses **`map.initialView.mode: manual`** (center Brazil, zoom 4) so the home map always opens framed on the demo territory without depending on `GET /territory/boundary-box` at first load.
 

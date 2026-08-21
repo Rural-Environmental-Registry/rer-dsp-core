@@ -29,6 +29,30 @@ FIXED_LAYER_IDS = {
     "dsp:territory-level-3",
     "dsp:area-of-interest",
 }
+CANONICAL_AOI_DETAIL_FIELDS = (
+    "id",
+    "registration_date",
+    "updated_at",
+    "area",
+)
+CALCULATED_AOI_DETAIL_FIELDS = (
+    "calculated.latitude",
+    "calculated.longitude",
+    "calculated.territory_level_2_name",
+    "calculated.territory_level_3_name",
+)
+FORBIDDEN_AOI_DETAIL_FIELDS = frozenset(
+    {
+        "theme_1",
+        "theme_2",
+        "theme_3",
+        "theme_4",
+        "geom",
+        "geometry",
+        "boundary_box",
+        "centroid_coordinates",
+    }
+)
 
 try:
     import yaml
@@ -249,6 +273,192 @@ def etl_field_help(field: str) -> str:
         ),
     }
     return descriptions.get(field, "Source value used by the ETL mapping.")
+
+
+def aoi_persist_columns(values: dict[str, Any]) -> list[str]:
+    """Extra destination columns selected for AOI migration."""
+    aoi = get(values, "etl", "area_of_interest", default={})
+    raw = aoi.get("persist_columns") if isinstance(aoi, dict) else None
+    return parse_column_list(raw, "etl.area_of_interest.persist_columns")
+
+
+def aoi_detail_field_options(persist_columns: list[str]) -> list[str]:
+    """Valid details-panel keys: persist_columns ∪ canonical ∪ calculated.*."""
+    options: list[str] = []
+    seen: set[str] = set()
+    for name in (
+        list(persist_columns)
+        + list(CANONICAL_AOI_DETAIL_FIELDS)
+        + list(CALCULATED_AOI_DETAIL_FIELDS)
+    ):
+        if name in seen:
+            continue
+        seen.add(name)
+        options.append(name)
+    return options
+
+
+def validate_aoi_detail_fields(
+    values: dict[str, Any],
+    persist_columns: list[str],
+) -> list[dict[str, str]]:
+    """Validate details.fields: AOI migration columns or calculated.* keys."""
+    prefix = "installation.screens.detail.fields"
+    detail = get(values, "installation", "screens", "detail", default={})
+    raw = detail.get("fields") if isinstance(detail, dict) else None
+    if raw is None or raw == []:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{prefix} must be a list of field/label mappings.")
+
+    extras = set(persist_columns)
+    calculated = set(CALCULATED_AOI_DETAIL_FIELDS)
+    seen: set[str] = set()
+    normalized: list[dict[str, str]] = []
+    for index, item in enumerate(raw):
+        item_prefix = f"{prefix}[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{item_prefix} must be a mapping with 'field' and 'label'.")
+        field = item.get("field")
+        label = item.get("label")
+        if not isinstance(field, str) or not field.strip():
+            raise ValueError(f"{item_prefix}.field is required.")
+        field = field.strip()
+        if "<" in field:
+            raise ValueError(f"{item_prefix}.field still contains a placeholder.")
+        if field in seen:
+            raise ValueError(f"{prefix}: duplicate field '{field}'.")
+        seen.add(field)
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"{item_prefix}.label is required.")
+        label = label.strip()
+        if "<" in label:
+            raise ValueError(f"{item_prefix}.label still contains a placeholder.")
+        if field in FORBIDDEN_AOI_DETAIL_FIELDS:
+            raise ValueError(
+                f"{item_prefix}.field '{field}' cannot be shown on the AOI details panel."
+            )
+        if field.startswith("calculated."):
+            if field not in calculated:
+                raise ValueError(
+                    f"{item_prefix}.field '{field}' is not a calculated details field. "
+                    "Use calculated.latitude, calculated.longitude, "
+                    "calculated.territory_level_2_name, or calculated.territory_level_3_name."
+                )
+            normalized.append({"field": field, "label": label})
+            continue
+        if field in CANONICAL_AOI_DETAIL_FIELDS:
+            normalized.append({"field": field, "label": label})
+            continue
+        if field not in extras:
+            raise ValueError(
+                f"{item_prefix}.field '{field}' is not in "
+                "etl.area_of_interest.persist_columns, is not a canonical AOI column "
+                "(id, registration_date, updated_at, area), and is not a calculated "
+                "field (calculated.latitude, calculated.longitude, "
+                "calculated.territory_level_2_name, calculated.territory_level_3_name). "
+                "Select it for AOI migration first, or remove it from details."
+            )
+        normalized.append({"field": field, "label": label})
+    return normalized
+
+
+def ask_aoi_detail_fields(config: dict[str, Any]) -> None:
+    """Prompt for details-panel fields after persist_columns is chosen."""
+    persist = parse_column_list(
+        config["etl"]["area_of_interest"].get("persist_columns") or [],
+        "etl.area_of_interest.persist_columns",
+    )
+    options = aoi_detail_field_options(persist)
+    options_set = set(options)
+    screens = config.setdefault("installation", {}).setdefault("screens", {})
+    detail = screens.setdefault("detail", {})
+    existing = detail.get("fields") or []
+    default_fields: list[str] = []
+    labels_by_field: dict[str, str] = {}
+    if isinstance(existing, list):
+        for item in existing:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("field") or "").strip()
+            if not name:
+                continue
+            default_fields.append(name)
+            existing_label = item.get("label")
+            if isinstance(existing_label, str) and existing_label.strip():
+                labels_by_field[name] = existing_label.strip()
+
+    identifier = screens.get("identifier") if isinstance(screens.get("identifier"), dict) else {}
+    hierarchy = get(config, "installation", "hierarchy", default={})
+    level2 = hierarchy.get("level2") if isinstance(hierarchy, dict) else {}
+    level3 = hierarchy.get("level3") if isinstance(hierarchy, dict) else {}
+    if not isinstance(level2, dict):
+        level2 = {}
+    if not isinstance(level3, dict):
+        level3 = {}
+    canonical_label_defaults = {
+        "id": identifier.get("label") or "Identifier",
+        "registration_date": detail.get("registration_date_label") or "Registration date",
+        "updated_at": detail.get("alteration_date_label") or "Alteration date",
+        "area": detail.get("area_label") or "Area",
+        "calculated.latitude": detail.get("latitude_label") or "Latitude",
+        "calculated.longitude": detail.get("longitude_label") or "Longitude",
+        "calculated.territory_level_2_name": level2.get("label") or "Level 2",
+        "calculated.territory_level_3_name": level3.get("label") or "Level 3",
+    }
+
+    while True:
+        print("\n  AOI details fields")
+        print(
+            "  What: Fields shown on the area of interest details panel, in this order. "
+            "Mix migrated columns with calculated.* keys."
+        )
+        print("  Used in: the home screen detail panel")
+        print(
+            "  calculated.* keys are calculated by the application, not a source column: "
+            + ", ".join(CALCULATED_AOI_DETAIL_FIELDS)
+        )
+        print("  Options: " + ", ".join(options))
+        print("  How: type field names separated by commas (order is kept).")
+        print("  Skip: press Enter to keep the built-in details list.")
+        raw = ask("  Fields", ", ".join(default_fields))
+        text = str(raw or "").strip()
+        if text and "," not in text and any(char.isspace() for char in text):
+            print(
+                "\n  Separate names with commas, not only spaces. "
+                "Example: id, nome, calculated.latitude"
+            )
+            continue
+        try:
+            selected = parse_column_list(text, "installation.screens.detail.fields")
+        except ValueError as exc:
+            print(f"\n  {exc}")
+            continue
+        unknown = [name for name in selected if name not in options_set]
+        if unknown:
+            print(
+                f"\n  These fields are not available: {', '.join(unknown)}. "
+                "Choose only from columns selected for AOI migration, "
+                "canonical columns (id, registration_date, updated_at, area), "
+                "and calculated.* keys."
+            )
+            continue
+        break
+
+    fields: list[dict[str, str]] = []
+    for name in selected:
+        default_label = labels_by_field.get(name) or canonical_label_defaults.get(name) or name
+        help_text = f"Label shown on the details panel for '{name}'."
+        if name.startswith("calculated."):
+            help_text += " This value is calculated by the application, not a source column."
+        label = ask_field(
+            f"AOI details label — {name}",
+            default_label,
+            help_text,
+            "the home screen detail panel",
+        )
+        fields.append({"field": name, "label": str(label).strip()})
+    detail["fields"] = fields
 
 
 def parse_column_list(raw: Any, prefix: str) -> list[str]:
@@ -958,6 +1168,7 @@ def build_batch_layers(extra_layers: list[dict[str, Any]]) -> list[dict[str, Any
 def apply_screen_text_overrides(
     installation: dict[str, Any],
     screens_yaml: dict[str, Any],
+    aoi_detail_fields: list[dict[str, str]],
 ) -> None:
     """Apply localized screen labels from adopter-config to installation-config."""
     home = installation["screens"]["home"]
@@ -972,9 +1183,9 @@ def apply_screen_text_overrides(
             if "placeholder" in identifier:
                 target["placeholder"] = identifier["placeholder"]
 
+    target = home.setdefault("detail", {})
     detail = screens_yaml.get("detail")
     if isinstance(detail, dict):
-        target = home.setdefault("detail", {})
         for yaml_key, json_key in (
             ("section_title", "sectionTitle"),
             ("area_of_interest_section_title", "areaOfInterestSectionTitle"),
@@ -987,6 +1198,7 @@ def apply_screen_text_overrides(
         ):
             if yaml_key in detail:
                 target[json_key] = detail[yaml_key]
+    target["fields"] = aoi_detail_fields
 
     downloads_yaml = screens_yaml.get("downloads")
     if isinstance(downloads_yaml, dict):
@@ -1164,7 +1376,7 @@ def ask_generic_layer_entry(
             print(f"\n  {exc}")
 
     entry["srid"] = ask_int_field(
-        "Layer SRID", entry.get("srid", 4674),
+        "Layer SRID", entry.get("srid", 4326),
         "Coordinate reference system identifier of the source geometry.",
         "ETL geometry conversion and GeoServer layers",
         minimum=1,
@@ -1254,20 +1466,20 @@ def ask_generic_layers(config: dict[str, Any]) -> None:
 
 def ask_data_preparation_flow() -> bool:
     print("\nBefore configuring a JDBC source, choose the data preparation flow:")
-    print("  1. Quickstart — demonstration data, no JDBC source or migration job")
-    print("  2. Empty databases — real adopter setup without running the migration job")
-    print("  3. Real adopter — configure a JDBC source and continue this wizard")
+    print("  1. Demonstration (built-in seed, no JDBC source or migration job)")
+    print("  2. Real adopter — migrate from JDBC source (ETL)")
+    print("  3. Real adopter — no migration (empty DBs, UI/GeoServer config only)")
 
     while True:
-        choice = ask("Choice", "3")
-        if choice == "3":
+        choice = ask("Choice", "2")
+        if choice == "2":
             return True
         if choice == "1":
-            if ask_bool("Use the Quickstart flow instead", True):
+            if ask_bool("Use the demonstration flow instead", True):
                 print("\nRun ./setup.sh and choose option 1 (Demonstration).")
                 print("This wizard will now exit without configuring a JDBC source.")
                 return False
-        elif choice == "2":
+        elif choice == "3":
             if ask_bool("Use the empty-database flow instead", True):
                 print("\nRun ./setup.sh and choose option 3 (Real adopter — no migration).")
                 print("This wizard will now exit without configuring a JDBC source.")
@@ -1528,6 +1740,7 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
                 etl_field_help("persist_columns"),
                 "the ETL job mapping for this entity",
             )
+            ask_aoi_detail_fields(config)
         config["etl"][name]["where_clause"] = ask_field(
             "where-clause", config["etl"][name]["where_clause"],
             "Optional SQL filter applied while reading this entity.",
@@ -1720,6 +1933,8 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
                 f"map.layers.{layer_name}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
             )
     extra_layers = validate_extra_layers(values)
+    persist_columns = aoi_persist_columns(values)
+    aoi_detail_fields = validate_aoi_detail_fields(values, persist_columns)
     if coerce_map_initial_view_to_planet(values):
         active.write_text(dump_yaml(values), encoding="utf-8")
     map_initial_view = validate_map_initial_view(values)
@@ -1752,7 +1967,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     installation["screens"]["downloads"]["title"] = screens.get(
         "downloads_title", installation["screens"]["downloads"]["title"]
     )
-    apply_screen_text_overrides(installation, screens)
+    apply_screen_text_overrides(installation, screens, aoi_detail_fields)
     cards = get(values, "installation", "kpis", default={})
     configured_cards = []
     for card in installation["kpis"]["cards"]:
@@ -1813,6 +2028,8 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             ):
                 if source in override:
                     layer[target] = override[source]
+                    if target == "activeDefault":
+                        layer["active"] = override[source]
             layer.setdefault("style", {})["color"] = override.get(
                 "color", layer["style"]["color"]
             )
@@ -1870,10 +2087,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             "where-clause": aoi_values.get("where_clause") or "1=1",
         }
     )
-    extras = parse_column_list(
-        aoi_values.get("persist_columns"),
-        "etl.area_of_interest.persist_columns",
-    )
+    extras = persist_columns
     canonical_source = {
         aoi["primary-key"],
         aoi["creation-date-column"],

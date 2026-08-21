@@ -43,7 +43,8 @@
         "latitudeLabel": "Latitude",
         "longitudeLabel": "Longitude",
         "areaLabel": "Area",
-        "featuresDownloadLabel": "Download features"
+        "featuresDownloadLabel": "Download features",
+        "fields": []
       }
     },
     "downloads": {

@@ -42,6 +42,23 @@ installation:
       longitude_label: Longitude
       area_label: Area
       features_download_label: Download features
+      # Optional. Fields shown on the details panel (order is kept).
+      # Mix destination column names with calculated.* keys.
+      # Columns: persist_columns extras, or canonical id / registration_date /
+      # updated_at / area.
+      # calculated.* is calculated by the application, not a source column:
+      #   calculated.latitude, calculated.longitude,
+      #   calculated.territory_level_2_name, calculated.territory_level_3_name
+      # Empty [] keeps the current built-in details list.
+      # Example:
+      #   fields:
+      #     - field: id
+      #       label: Identifier
+      #     - field: nome
+      #       label: Property name
+      #     - field: calculated.latitude
+      #       label: Centroid latitude
+      fields: []
     downloads:
       theme:
         label: Theme

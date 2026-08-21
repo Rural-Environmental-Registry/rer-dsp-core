@@ -137,6 +137,7 @@ batch:
     # business-only-persist-columns: KPI columns, dsp-db only (same name on target).
     # To fill theme_1..theme_4, the source column or subquery alias must already
     # be named theme_N — the job does not rename extras.
+    # Details-panel fields stay in installation-config.json, not in this YAML.
     source-table: <source_schema>.<source_table>
     target-table: dsp.area_of_interest
     primary-key: <source_pk>
