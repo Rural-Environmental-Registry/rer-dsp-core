@@ -1,0 +1,10 @@
+# How to use
+
+This is placeholder content for a second "About" tab. Replace this file with
+instructions for using your platform (searching, filters, downloads, etc.).
+
+## Example section
+
+- Add as many tabs as needed by declaring them in `about-config.json` and
+  running `./config.sh`.
+- Keep one `.md` file per tab inside this folder.

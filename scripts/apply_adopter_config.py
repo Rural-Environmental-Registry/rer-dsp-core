@@ -1257,6 +1257,56 @@ def build_extra_map_layer(entry: dict[str, Any], group_json_key: str) -> dict[st
     }
 
 
+def build_about_config(values: dict[str, Any], about_dir: Path) -> dict[str, Any]:
+    """Build about-config.json from about.* adopter settings."""
+    about = get(values, "about", default={}) or {}
+    enabled = bool(about.get("enabled", False))
+    if not enabled:
+        return {"enabled": False, "bannerTitle": "About", "defaultTabId": None, "tabs": []}
+
+    raw_tabs = about.get("tabs")
+    if not isinstance(raw_tabs, list) or not raw_tabs:
+        raise ValueError("about.tabs must have at least one entry when about.enabled is true.")
+
+    tabs: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for index, tab in enumerate(raw_tabs):
+        prefix = f"about.tabs[{index}]"
+        if not isinstance(tab, dict):
+            raise ValueError(f"{prefix} must be a mapping with id, label, and file.")
+        tab_id = tab.get("id")
+        label = tab.get("label")
+        file_name = tab.get("file")
+        if not isinstance(tab_id, str) or not tab_id.strip():
+            raise ValueError(f"{prefix}.id is required.")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"{prefix}.label is required.")
+        if not isinstance(file_name, str) or not file_name.strip():
+            raise ValueError(f"{prefix}.file is required.")
+        tab_id = tab_id.strip()
+        file_name = file_name.strip()
+        if tab_id in seen_ids:
+            raise ValueError(f"about.tabs: duplicate id '{tab_id}'.")
+        seen_ids.add(tab_id)
+        if not (about_dir / file_name).is_file():
+            raise ValueError(
+                f"{prefix}.file '{file_name}' does not exist in {about_dir}. "
+                "Create the Markdown file before running ./config.sh."
+            )
+        tabs.append({"id": tab_id, "label": label.strip(), "file": file_name})
+
+    default_tab_id = about.get("default_tab_id")
+    if default_tab_id not in seen_ids:
+        default_tab_id = tabs[0]["id"]
+
+    return {
+        "enabled": True,
+        "bannerTitle": str(about.get("banner_title") or "About"),
+        "defaultTabId": default_tab_id,
+        "tabs": tabs,
+    }
+
+
 def layer_name_to_code(layer_name: str) -> str:
     return layer_name.replace("-", "_")
 
@@ -1969,9 +2019,107 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
             allow_transparent=True,
         )
 
+    ask_about_page(config, example.parent.parent / "about")
+
     write_adopter_config(active, config, template)
     print(f"\nConfiguration saved to {active}")
     return True
+
+
+ABOUT_MAX_TABS = 8
+
+
+def ask_about_page(config: dict[str, Any], about_dir: Path) -> None:
+    """Configure the optional custom About page (about.enabled + tabs)."""
+    about = config.setdefault("about", {})
+    print("\n" + "=" * 72)
+    print("Optional — Custom About page")
+    print("=" * 72)
+    print("  What: Replaces the built-in About page with tabs rendered from")
+    print(f"        Markdown files in {about_dir}")
+    print("  Used in: the frontend About page")
+    enabled = ask_bool(
+        "Enable a custom About page", bool(about.get("enabled", False))
+    )
+    about["enabled"] = enabled
+    if not enabled:
+        return
+
+    tab_count = ask_int_field(
+        "Number of About tabs",
+        len(about.get("tabs") or []) or 1,
+        "How many tabs the About page will show.",
+        "the frontend About page",
+        minimum=1,
+        maximum=ABOUT_MAX_TABS,
+    )
+
+    existing_tabs = about.get("tabs") or []
+    tabs: list[dict[str, str]] = []
+    for index in range(tab_count):
+        existing = existing_tabs[index] if index < len(existing_tabs) else {}
+        default_id = existing.get("id") or f"tab-{index + 1}"
+        default_label = existing.get("label") or f"Tab {index + 1}"
+        default_file = existing.get("file") or ""
+
+        tab_id = ask_field(
+            f"About tab {index + 1} — id",
+            default_id,
+            "Unique identifier for this tab (used by the frontend).",
+            "the frontend About page",
+        )
+        label = ask_field(
+            f"About tab {index + 1} — label",
+            default_label,
+            "Text shown on the tab.",
+            "the frontend About page",
+        )
+        while True:
+            file_name = str(
+                ask_field(
+                    f"About tab {index + 1} — Markdown file",
+                    default_file or "overview.md",
+                    f"File name relative to {about_dir} (must already exist there).",
+                    "the frontend About page",
+                )
+            ).strip()
+            if not file_name or "<" in file_name:
+                print("\n  Enter a file name (e.g. overview.md).")
+                continue
+            if not (about_dir / file_name).is_file():
+                print(
+                    f"\n  File not found: {about_dir / file_name}. "
+                    f"Create it in {about_dir} first (see the .md.example files there)."
+                )
+                continue
+            break
+        tabs.append({"id": str(tab_id).strip(), "label": str(label).strip(), "file": file_name})
+
+    ids = [tab["id"] for tab in tabs]
+    if len(set(ids)) != len(ids):
+        raise ValueError("about.tabs ids must be unique.")
+
+    about["tabs"] = tabs
+    default_tab_id = about.get("default_tab_id")
+    if default_tab_id not in ids:
+        default_tab_id = ids[0]
+    about["default_tab_id"] = ask_field(
+        "About page — default tab id",
+        default_tab_id,
+        "Tab id shown by default when the About page opens.",
+        "the frontend About page",
+    )
+    if about["default_tab_id"] not in ids:
+        raise ValueError(
+            f"about.default_tab_id '{about['default_tab_id']}' must match one of the tab ids: "
+            + ", ".join(ids)
+        )
+    about["banner_title"] = ask_field(
+        "About page — banner title",
+        about.get("banner_title", "About"),
+        "Title shown at the top of the About page.",
+        "the frontend About page",
+    )
 
 
 def replace_env(env_file: Path, values: dict[str, Any]) -> None:
@@ -2233,6 +2381,12 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     download_file.write_text(
         json.dumps(download_themes, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+    )
+
+    about_config = build_about_config(values, root / "config/about")
+    about_file = root / "config/about/about-config.json"
+    about_file.write_text(
+        json.dumps(about_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
     migration_example = root / "config/Job-Data-Migration/application/application.yaml.example"

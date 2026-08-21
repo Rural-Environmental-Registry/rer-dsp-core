@@ -253,3 +253,15 @@ map:
       active_default: true
       color: "#F59E0B"
       fill_color: "#FEF3C7"
+
+about:
+  # Custom "About" page, built from Markdown files in config/about/.
+  # enabled: false hides the page entirely.
+  # Each tab file must exist in config/about/ before ./config.sh is run.
+  enabled: false
+  banner_title: "About"
+  default_tab_id: "overview"
+  tabs:
+    - id: "overview"
+      label: "Overview"
+      file: "overview.md"
