@@ -18,7 +18,7 @@ print_config_intro() {
   echo ""
   echo "Guided Adopter Configuration"
   echo ""
-  echo "This wizard collects adopter-specific settings (source database, KPIs, map layers, and migration jobs)."
+  echo "This wizard collects adopter-specific settings in this order: source database, tables and jobs, application settings, then interface."
   echo "Your configuration is stored in:"
   echo "  $CONFIG_FILE"
   echo ""
@@ -58,7 +58,7 @@ if [ -f "$CONFIG_FILE" ]; then
   echo "  3) Start over from the template (discards current file)"
   echo ""
   choice=""
-  read -r -p "Choice [1/2/3]: " choice || true
+  read -e -r -p "Choice [1/2/3]: " choice || true
   case "$choice" in
     1)
       python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE"

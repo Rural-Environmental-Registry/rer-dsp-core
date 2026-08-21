@@ -683,10 +683,10 @@ validate_positive_integer() {
 export_layer_srids_from_migration_config() {
   local srid_l1 srid_l2 srid_l3 srid_aoi
 
-  srid_l1="${LAYER_SRS_TERRITORY_LEVEL_1:-4674}"
-  srid_l2="${LAYER_SRS_TERRITORY_LEVEL_2:-4674}"
-  srid_l3="${LAYER_SRS_TERRITORY_LEVEL_3:-4674}"
-  srid_aoi="${LAYER_SRS_AREA_OF_INTEREST:-4674}"
+  srid_l1="${LAYER_SRS_TERRITORY_LEVEL_1:-4326}"
+  srid_l2="${LAYER_SRS_TERRITORY_LEVEL_2:-4326}"
+  srid_l3="${LAYER_SRS_TERRITORY_LEVEL_3:-4326}"
+  srid_aoi="${LAYER_SRS_AREA_OF_INTEREST:-4326}"
 
   srid_l1="${srid_l1#EPSG:}"
   srid_l2="${srid_l2#EPSG:}"
@@ -1588,7 +1588,7 @@ start_geoserver_exhibition() {
   local mode="${1:-up}"
   local migration_config="${2:-}"
 
-  # LAYER_SRS_* come from .env (defaults 4674); migration YAML path is unused for SRS today.
+  # LAYER_SRS_* come from .env (defaults 4326); migration YAML path is unused for SRS today.
   info "Resolving layer SRS from .env (LAYER_SRS_*)..."
   export_layer_srids_from_migration_config "$migration_config"
   if [ -z "$migration_config" ] || [ ! -f "$migration_config" ]; then

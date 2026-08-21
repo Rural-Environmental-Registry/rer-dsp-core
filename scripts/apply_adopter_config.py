@@ -8,10 +8,19 @@ import copy
 import json
 import os
 import re
+import select
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+try:
+    import termios
+    import tty
+except ImportError:
+    termios = None
+    tty = None
 
 FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
 # Downloads use GeoServer Download (separate from map Exhibition WMS).
@@ -62,11 +71,21 @@ except ImportError:
 
 
 class AdopterConfigDumper(yaml.SafeDumper):
-    """Write multiline SQL values as readable YAML folded blocks."""
+    """Write string values in double quotes; keys, numbers, booleans and null unquoted."""
+
+    def represent_mapping(self, tag, mapping, flow_style=None):
+        node = super().represent_mapping(tag, mapping, flow_style)
+        for key_node, _value_node in node.value:
+            if (
+                isinstance(key_node, yaml.ScalarNode)
+                and key_node.tag == "tag:yaml.org,2002:str"
+            ):
+                key_node.style = None
+        return node
 
 
 def represent_multiline_string(dumper: yaml.SafeDumper, value: str) -> yaml.nodes.ScalarNode:
-    style = ">" if "\n" in value else None
+    style = ">" if "\n" in value else '"'
     return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
 
 
@@ -80,6 +99,14 @@ def dump_yaml(data: Any) -> str:
         allow_unicode=True,
         sort_keys=False,
     )
+
+
+def write_adopter_config(
+    path: Path, values: dict[str, Any], template: dict[str, Any]
+) -> None:
+    """Write adopter YAML using the template key order."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(dump_yaml(deep_merge(template, values)), encoding="utf-8")
 
 
 def read_dotenv_value(env_file: Path, key: str, default: str = "") -> str:
@@ -120,10 +147,177 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return merged
 
 
+def _read_clipboard() -> str:
+    """Return clipboard text when a host tool is available."""
+    for cmd in (
+        ["wl-paste", "-n"],
+        ["xclip", "-selection", "clipboard", "-o"],
+        ["xsel", "--clipboard", "--output"],
+        ["pbpaste"],
+    ):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                return result.stdout
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    return ""
+
+
+def _sanitize_pasted_text(text: str) -> str:
+    """Keep wizard answers on one line."""
+    if not text:
+        return ""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized.split("\n", 1)[0]
+
+
+_stdin_pushback: list[str] = []
+
+
+def _read_char() -> str:
+    """Read one stdin character, honoring any pushback from prior reads."""
+    if _stdin_pushback:
+        return _stdin_pushback.pop(0)
+    return sys.stdin.read(1)
+
+
+def _consume_optional_lf() -> None:
+    """Drop a trailing LF after CR so it does not answer the next prompt."""
+    if not select.select([sys.stdin], [], [], 0)[0]:
+        return
+    ch = sys.stdin.read(1)
+    if ch != "\n":
+        _stdin_pushback.append(ch)
+
+
+def _read_bracketed_paste() -> str:
+    """Read terminal bracketed paste payload until ESC [ 201 ~."""
+    parts: list[str] = []
+    while True:
+        ch = _read_char()
+        if ch != "\x1b":
+            parts.append(ch)
+            continue
+        if _read_char() != "[":
+            parts.append("\x1b")
+            continue
+        param = ""
+        while True:
+            code = _read_char()
+            if code == "~":
+                if param == "201":
+                    return "".join(parts)
+                parts.append("\x1b[" + param + "~")
+                break
+            param += code
+
+
+def _read_interactive_line(prompt: str) -> str:
+    """Read one line with arrow keys, backspace/delete and Ctrl+V paste."""
+    if termios is None or tty is None or not sys.stdin.isatty():
+        return input(prompt)
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    buffer: list[str] = []
+    cursor = 0
+
+    def redraw() -> None:
+        sys.stdout.write("\r" + prompt + "".join(buffer))
+        sys.stdout.write("\x1b[K")
+        tail = len(buffer) - cursor
+        if tail:
+            sys.stdout.write(f"\x1b[{tail}D")
+        sys.stdout.flush()
+
+    def insert_text(text: str) -> None:
+        nonlocal cursor
+        if not text:
+            return
+        buffer[cursor:cursor] = list(text)
+        cursor += len(text)
+        redraw()
+
+    def delete_forward() -> None:
+        nonlocal cursor
+        if cursor < len(buffer):
+            del buffer[cursor]
+            redraw()
+
+    def delete_backward() -> None:
+        nonlocal cursor
+        if cursor > 0:
+            del buffer[cursor - 1]
+            cursor -= 1
+            redraw()
+
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+
+    try:
+        tty.setcbreak(fd)
+        while True:
+            ch = _read_char()
+            if ch == "\n":
+                break
+            if ch == "\r":
+                _consume_optional_lf()
+                break
+            if ch == "\x03":
+                raise KeyboardInterrupt
+            if ch == "\x04" and not buffer:
+                break
+            if ch == "\x16":  # Ctrl+V
+                insert_text(_sanitize_pasted_text(_read_clipboard()))
+                continue
+            if ch in ("\x7f", "\x08"):
+                delete_backward()
+                continue
+            if ch == "\x1b":
+                if _read_char() != "[":
+                    continue
+                param = ""
+                while True:
+                    code = _read_char()
+                    if code == "~":
+                        if param == "200":
+                            insert_text(_sanitize_pasted_text(_read_bracketed_paste()))
+                        elif param == "3":
+                            delete_forward()
+                        break
+                    if code.isalpha() and not param:
+                        if code == "D" and cursor > 0:
+                            cursor -= 1
+                            sys.stdout.write("\x1b[D")
+                            sys.stdout.flush()
+                        elif code == "C" and cursor < len(buffer):
+                            cursor += 1
+                            sys.stdout.write("\x1b[C")
+                            sys.stdout.flush()
+                        break
+                    param += code
+                continue
+            if ch.isprintable() or ch == "\t":
+                insert_text(ch)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return "".join(buffer)
+
+
 def ask(label: str, default: Any = "") -> Any:
     suffix = f" [{default}]" if default not in ("", None) else ""
     print(f"{label}{suffix}:")
-    answer = input("  > ").strip()
+    answer = _read_interactive_line("  > ").strip()
     return default if answer == "" else answer
 
 
@@ -1540,7 +1734,7 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
             return False
 
     print("\n" + "=" * 72)
-    print("Stage 1/5 — Source database and spatial reference")
+    print("Stage 1/4 — Source database and spatial reference")
     print("=" * 72)
     env = config["environment"]
     env["source_jdbc_url"] = ask_field(
@@ -1572,30 +1766,8 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         )
 
     print("\n" + "=" * 72)
-    print("Stage 2/5 — Application text and KPI selection")
+    print("Stage 2/4 — Source tables, columns, and migration jobs")
     print("=" * 72)
-    for level in ("level1", "level2", "level3"):
-        section = config["installation"]["hierarchy"][level]
-        section["label"] = ask_field(
-            f"Displayed name for {level}", section["label"],
-            "Name shown to users for this hierarchy level.",
-            "filters, downloads, and detail screens",
-        )
-        section["placeholder"] = ask_field(
-            f"Selection text for {level}", section["placeholder"],
-            "Text shown when the user has not selected this level.",
-            "hierarchy filter controls",
-        )
-    screens = config["installation"]["screens"]
-    screens["home_title"] = ask_field(
-        "Home screen title", screens["home_title"],
-        "Title displayed above the registration search screen.", "the home screen",
-    )
-    screens["downloads_title"] = ask_field(
-        "Downloads screen title", screens["downloads_title"],
-        "Title displayed above the public downloads screen.", "the downloads screen",
-    )
-    ask_screen_text_fields(screens)
     theme_count = ask_int_field(
         "Number of theme KPIs (0-4)", config["installation"]["kpis"]["theme_count"],
         "Number of optional theme measurements available in the source data. "
@@ -1607,93 +1779,6 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
     )
     config["installation"]["kpis"]["theme_count"] = theme_count
     reset_disabled_themes(config, template, theme_count)
-    for code in ("area_of_interest", "theme_1", "theme_2", "theme_3", "theme_4"):
-        card = config["installation"]["kpis"][code]
-        if code != "area_of_interest" and not card["enabled"]:
-            continue
-        card["label"] = ask_field(
-            f"KPI label for {code}", card["label"],
-            "Human-readable name shown on the KPI card.", "the application dashboard",
-        )
-        card["unit_of_measurement"] = ask_field(
-            f"KPI unit for {code}", card["unit_of_measurement"],
-            "Unit displayed beside the KPI value.", "the application dashboard",
-        )
-        if code == "area_of_interest":
-            card["optional_label"] = ask_field(
-                "KPI optional label for area_of_interest", card["optional_label"],
-                "Secondary unit shown for the area sum (e.g. ha).",
-                "the AREA_OF_INTEREST KPI card",
-            )
-    area = config["installation"]["area"]
-    area["unit"] = ask_field(
-        "Area unit code", area["unit"],
-        "Short code for the area measurement (e.g. ha, m²).",
-        "area labels and KPI subtotals",
-    )
-    area["unit_label"] = ask_field(
-        "Area unit label", area["unit_label"],
-        "Label shown beside area values in the UI.",
-        "detail screens and downloads",
-    )
-    formats = config["installation"]["formats"]
-    formats["date"] = ask_field(
-        "Date format", formats["date"],
-        "Pattern for dates without time (Java-style, e.g. dd/MM/yyyy).",
-        "lists and detail screens",
-    )
-    formats["date_time"] = ask_field(
-        "Date-time format", formats["date_time"],
-        "Pattern for dates with time (e.g. dd/MM/yyyy HH:mm).",
-        "detail screens",
-    )
-
-    print("\n" + "=" * 72)
-    print("Stage 3/5 — KPI colors and map layers")
-    print("=" * 72)
-    ask_kpi_accent_colors(config, theme_count)
-    ask_map_initial_view(config)
-    group_names = config["map"]["group_names"]
-    group_names["territorial_division"] = ask_field(
-        "Map group name — territorial division", group_names["territorial_division"],
-        "Title of the territorial hierarchy layer group in the map.",
-        "the map layer selector",
-    )
-    group_names["areas_of_interest"] = ask_field(
-        "Map group name — areas of interest", group_names["areas_of_interest"],
-        "Title of the declared areas layer group in the map.",
-        "the map layer selector",
-    )
-    sync_map_layer_names(config)
-    for layer_name, layer in config["map"]["layers"].items():
-        print(f"\n  Layer name for {layer_name}")
-        print("  What: Same display name defined in the previous stage.")
-        print("  Used in: the map layer selector")
-        print(f"  Value: {layer['name']}")
-        print(f"\n  WMS URL for {layer_name}")
-        print("  What: Fixed GeoServer WMS endpoint serving this layer.")
-        print("  Used in: the map client and GeoServer requests")
-        print(f"  Value: {FIXED_WMS_BASE_URL}")
-        layer["active_default"] = ask_bool_field(
-            f"Enable {layer_name} by default", layer["active_default"],
-            "Whether the layer starts enabled when the map opens.",
-            "the initial map state",
-        )
-        layer["color"] = ask_color_field(
-            f"Stroke color for {layer_name}", layer["color"],
-            "Line color used to draw the layer boundary.",
-            "the map and generated GeoServer style",
-        )
-        layer["fill_color"] = ask_color_field(
-            f"Fill color for {layer_name}", layer["fill_color"],
-            "Fill color used inside the layer; use transparent when needed.",
-            "the map and generated GeoServer style",
-            allow_transparent=True,
-        )
-
-    print("\n" + "=" * 72)
-    print("Stage 4/5 — Source tables and columns")
-    print("=" * 72)
     for name, fields in (
         ("level1", ("source_table", "primary_key", "name_column", "geometry_column", "updated_at_column")),
         (
@@ -1740,16 +1825,12 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
                 etl_field_help("persist_columns"),
                 "the ETL job mapping for this entity",
             )
-            ask_aoi_detail_fields(config)
         config["etl"][name]["where_clause"] = ask_field(
             "where-clause", config["etl"][name]["where_clause"],
             "Optional SQL filter applied while reading this entity.",
             "the ETL source query",
         )
 
-    print("\n" + "=" * 72)
-    print("Stage 5/5 — Migration jobs")
-    print("=" * 72)
     for name in ("level1", "level2", "level3", "area_of_interest"):
         config["etl"]["jobs"][name] = ask_bool_field(
             f"Run {name} job", config["etl"]["jobs"][name],
@@ -1758,7 +1839,7 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         )
     config["etl"]["jobs"]["layer_jobs"] = ask_bool_field(
         "Run generic layer jobs",
-        bool(config["etl"]["jobs"].get("layer_jobs", False)),
+        bool(config["etl"]["jobs"].get("layer_jobs", True)),
         "Whether extra layers (etl.layers) should be migrated and published.",
         "the ETL execution plan",
     )
@@ -1778,11 +1859,117 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         "in downloadThemesConfig.json."
     )
 
-    active.parent.mkdir(parents=True, exist_ok=True)
-    active.write_text(
-        dump_yaml(config),
-        encoding="utf-8",
+    print("\n" + "=" * 72)
+    print("Stage 3/4 — Application settings")
+    print("=" * 72)
+    for code in ("area_of_interest", "theme_1", "theme_2", "theme_3", "theme_4"):
+        card = config["installation"]["kpis"][code]
+        if code != "area_of_interest" and not card["enabled"]:
+            continue
+        card["label"] = ask_field(
+            f"KPI label for {code}", card["label"],
+            "Human-readable name shown on the KPI card.", "the application dashboard",
+        )
+        card["unit_of_measurement"] = ask_field(
+            f"KPI unit for {code}", card["unit_of_measurement"],
+            "Unit displayed beside the KPI value.", "the application dashboard",
+        )
+        if code == "area_of_interest":
+            card["optional_label"] = ask_field(
+                "KPI optional label for area_of_interest", card["optional_label"],
+                "Secondary unit shown for the area sum (e.g. ha).",
+                "the AREA_OF_INTEREST KPI card",
+            )
+    area = config["installation"]["area"]
+    area["unit"] = ask_field(
+        "Area unit code", area["unit"],
+        "Short code for the area measurement (e.g. ha, m²).",
+        "area labels and KPI subtotals",
     )
+    area["unit_label"] = ask_field(
+        "Area unit label", area["unit_label"],
+        "Label shown beside area values in the UI.",
+        "detail screens and downloads",
+    )
+    formats = config["installation"]["formats"]
+    formats["date"] = ask_field(
+        "Date format", formats["date"],
+        "Pattern for dates without time (Java-style, e.g. dd/MM/yyyy).",
+        "lists and detail screens",
+    )
+    formats["date_time"] = ask_field(
+        "Date-time format", formats["date_time"],
+        "Pattern for dates with time (e.g. dd/MM/yyyy HH:mm).",
+        "detail screens",
+    )
+
+    print("\n" + "=" * 72)
+    print("Stage 4/4 — Interface")
+    print("=" * 72)
+    for level in ("level1", "level2", "level3"):
+        section = config["installation"]["hierarchy"][level]
+        section["label"] = ask_field(
+            f"Displayed name for {level}", section["label"],
+            "Name shown to users for this hierarchy level.",
+            "filters, downloads, and detail screens",
+        )
+        section["placeholder"] = ask_field(
+            f"Selection text for {level}", section["placeholder"],
+            "Text shown when the user has not selected this level.",
+            "hierarchy filter controls",
+        )
+    screens = config["installation"]["screens"]
+    screens["home_title"] = ask_field(
+        "Home screen title", screens["home_title"],
+        "Title displayed above the registration search screen.", "the home screen",
+    )
+    screens["downloads_title"] = ask_field(
+        "Downloads screen title", screens["downloads_title"],
+        "Title displayed above the public downloads screen.", "the downloads screen",
+    )
+    ask_screen_text_fields(screens)
+    ask_aoi_detail_fields(config)
+    ask_kpi_accent_colors(config, theme_count)
+    ask_map_initial_view(config)
+    group_names = config["map"]["group_names"]
+    group_names["territorial_division"] = ask_field(
+        "Map group name — territorial division", group_names["territorial_division"],
+        "Title of the territorial hierarchy layer group in the map.",
+        "the map layer selector",
+    )
+    group_names["areas_of_interest"] = ask_field(
+        "Map group name — areas of interest", group_names["areas_of_interest"],
+        "Title of the declared areas layer group in the map.",
+        "the map layer selector",
+    )
+    sync_map_layer_names(config)
+    for layer_name, layer in config["map"]["layers"].items():
+        print(f"\n  Layer name for {layer_name}")
+        print("  What: Same display name defined earlier in this wizard.")
+        print("  Used in: the map layer selector")
+        print(f"  Value: {layer['name']}")
+        print(f"\n  WMS URL for {layer_name}")
+        print("  What: Fixed GeoServer WMS endpoint serving this layer.")
+        print("  Used in: the map client and GeoServer requests")
+        print(f"  Value: {FIXED_WMS_BASE_URL}")
+        layer["active_default"] = ask_bool_field(
+            f"Enable {layer_name} by default", layer["active_default"],
+            "Whether the layer starts enabled when the map opens.",
+            "the initial map state",
+        )
+        layer["color"] = ask_color_field(
+            f"Stroke color for {layer_name}", layer["color"],
+            "Line color used to draw the layer boundary.",
+            "the map and generated GeoServer style",
+        )
+        layer["fill_color"] = ask_color_field(
+            f"Fill color for {layer_name}", layer["fill_color"],
+            "Fill color used inside the layer; use transparent when needed.",
+            "the map and generated GeoServer style",
+            allow_transparent=True,
+        )
+
+    write_adopter_config(active, config, template)
     print(f"\nConfiguration saved to {active}")
     return True
 
@@ -1896,7 +2083,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     config_changed = sync_map_layer_names(values) or config_changed
     config_changed = normalize_adopter_layer_field_aliases(values) or config_changed
     if config_changed:
-        active.write_text(dump_yaml(values), encoding="utf-8")
+        write_adopter_config(active, values, template)
     source_values = []
     for entity in ("level1", "level2", "level3", "area_of_interest"):
         entity_values = get(values, "etl", entity, default={})
@@ -1936,7 +2123,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     persist_columns = aoi_persist_columns(values)
     aoi_detail_fields = validate_aoi_detail_fields(values, persist_columns)
     if coerce_map_initial_view_to_planet(values):
-        active.write_text(dump_yaml(values), encoding="utf-8")
+        write_adopter_config(active, values, template)
     map_initial_view = validate_map_initial_view(values)
     kpis = get(values, "installation", "kpis", default={})
     for code in enabled_kpi_codes(theme_count):
@@ -1945,11 +2132,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             raise ValueError(
                 f"installation.kpis.{code}.accent_color must be a #RGB or #RRGGBB value."
             )
-    if any(
-        "\n" in str(get(values, "etl", entity, "source_table", default=""))
-        for entity in ("level1", "level2", "level3", "area_of_interest")
-    ):
-        active.write_text(dump_yaml(values), encoding="utf-8")
+    write_adopter_config(active, values, template)
     installation = json.loads(
         (root / "config/installation/installation-config.json.example").read_text(
             encoding="utf-8"
@@ -2121,7 +2304,6 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         if source in canonical_source or source in extras:
             raise ValueError(
                 f"etl.area_of_interest.theme_{index}_column '{source}' duplicates "
-                "a required or extra persist column."
             )
         if source in aoi["business-only-persist-columns"]:
             raise ValueError(
