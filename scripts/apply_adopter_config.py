@@ -1732,7 +1732,16 @@ def ask_data_preparation_flow() -> bool:
             print("Invalid choice. Enter 1, 2, or 3.")
 
 
-def ask_existing_config_file(active: Path) -> bool:
+def config_display_path(active: Path, root: Path | None = None) -> str:
+    if root is not None:
+        try:
+            return str(active.resolve().relative_to(root.resolve()))
+        except ValueError:
+            pass
+    return str(active)
+
+
+def ask_existing_config_file(active: Path, config_ref: str) -> bool:
     print("\nHow do you want to configure the adopter?")
     print("  1. Guided configuration")
     print("     Create adopter-config.yaml step by step.")
@@ -1742,23 +1751,23 @@ def ask_existing_config_file(active: Path) -> bool:
     while True:
         choice = ask("Choice", "1")
         if choice == "1":
-            print(f"\nThe wizard will create {active} when you finish.")
+            print("\nThe wizard will save your answers when you finish.")
             print(
                 "You can edit that YAML manually at any time; run ./config.sh "
                 "and choose 1 (reapply) to regenerate the operational files."
             )
             return True
         if choice == "2":
-            resolved = active.resolve()
-            print(f"\nPlace your adopter-config.yaml at:\n  {resolved}")
+            print(f"\nPlace your adopter-config.yaml at:\n  {config_ref}")
             print("You can edit that file manually whenever you need.")
             print("When ready, run ./config.sh and choose 1 (reapply).")
             return False
         print("Invalid choice. Enter 1 or 2.")
 
 
-def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
+def wizard(example: Path, active: Path, *, edit: bool = False, root: Path | None = None) -> bool:
     print()
+    config_ref = config_display_path(active, root)
     template = yaml.safe_load(example.read_text(encoding="utf-8"))
     if edit:
         if not active.is_file():
@@ -1767,20 +1776,17 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         saved = yaml.safe_load(active.read_text(encoding="utf-8"))
         config = deep_merge(template, saved)
         print("Edit adopter configuration")
-        print(f"Editing: {active}")
         print("Each stage explains the field and where its value is used.")
         print("Values between brackets are the current saved values.")
         print("Press Enter to keep the displayed value.")
     else:
         config = copy.deepcopy(template)
-        print("Guided adopter configuration")
-        print(f"Output file: {active}")
         print("Each stage explains the field and where its value is used.")
         print("Values between brackets are default/example values.")
         print("Press Enter to accept the displayed default/example value.")
         if not ask_data_preparation_flow():
             return False
-        if not ask_existing_config_file(active):
+        if not ask_existing_config_file(active, config_ref):
             return False
 
     print("\n" + "=" * 72)
@@ -2515,7 +2521,7 @@ def main() -> None:
         raise SystemExit(1)
     if args.wizard:
         try:
-            if not wizard(example, active, edit=args.edit):
+            if not wizard(example, active, edit=args.edit, root=args.root):
                 return
         except ValueError as error:
             print(f"\nConfiguration error: {error}", file=sys.stderr)

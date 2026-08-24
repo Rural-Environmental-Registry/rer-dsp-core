@@ -49,8 +49,7 @@ print_config_intro
 
 if [ -f "$CONFIG_FILE" ]; then
   echo ""
-  echo "An existing configuration was found:"
-  echo "  $CONFIG_FILE"
+  echo "An existing configuration was found."
   echo ""
   echo "What do you want to do?"
   echo "  1) Reapply the existing configuration (no wizard)"

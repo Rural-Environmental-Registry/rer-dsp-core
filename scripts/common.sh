@@ -1452,6 +1452,9 @@ ensure_quickstart_adopter_configs() {
   local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
   local download_example="$ROOT_DIR/config/downloads/downloadThemesConfig.quickstart.json.example"
   local download_active="$ROOT_DIR/config/downloads/downloadThemesConfig.json"
+  local about_example="$ROOT_DIR/config/about/about-config.quickstart.json.example"
+  local about_active="$ROOT_DIR/config/about/about-config.json"
+  local about_dir="$ROOT_DIR/config/about"
 
   if [ ! -f "$install_example" ]; then
     error "Quickstart installation template not found at: $install_example"
@@ -1463,6 +1466,10 @@ ensure_quickstart_adopter_configs() {
   fi
   if [ ! -f "$download_example" ]; then
     error "Quickstart download themes template not found at: $download_example"
+    exit 1
+  fi
+  if [ ! -f "$about_example" ]; then
+    error "Quickstart about config template not found at: $about_example"
     exit 1
   fi
 
@@ -1477,6 +1484,22 @@ ensure_quickstart_adopter_configs() {
   cp "$download_example" "$download_active"
   info "Download themes config set from quickstart template:"
   echo "       $download_active"
+
+  cp "$about_example" "$about_active"
+  info "About config set from quickstart template:"
+  echo "       $about_active"
+
+  for about_md in overview how-to-use configuration license; do
+    local about_md_example="$about_dir/${about_md}.quickstart.md.example"
+    local about_md_active="$about_dir/${about_md}.md"
+    if [ ! -f "$about_md_example" ]; then
+      error "Quickstart about markdown template not found at: $about_md_example"
+      exit 1
+    fi
+    cp "$about_md_example" "$about_md_active"
+  done
+  info "About markdown tabs set from quickstart templates in:"
+  echo "       $about_dir"
 
   if ! validate_json_file "$install_active"; then
     error "Installation config contains invalid JSON: $install_active"
@@ -1493,6 +1516,11 @@ ensure_quickstart_adopter_configs() {
     exit 1
   fi
   validate_download_themes_config "$download_active"
+
+  if ! validate_json_file "$about_active"; then
+    error "About config contains invalid JSON: $about_active"
+    exit 1
+  fi
 }
 
 is_quickstart_configured() {
@@ -1502,6 +1530,8 @@ is_quickstart_configured() {
   local map_active="$ROOT_DIR/config/map/mapLayersConfig.json"
   local download_example="$ROOT_DIR/config/downloads/downloadThemesConfig.quickstart.json.example"
   local download_active="$ROOT_DIR/config/downloads/downloadThemesConfig.json"
+  local about_example="$ROOT_DIR/config/about/about-config.quickstart.json.example"
+  local about_active="$ROOT_DIR/config/about/about-config.json"
   local adopter_config="$ROOT_DIR/config/adopter/adopter-config.yaml"
 
   [ ! -f "$adopter_config" ] &&
@@ -1511,9 +1541,16 @@ is_quickstart_configured() {
     [ -f "$map_active" ] &&
     [ -f "$download_example" ] &&
     [ -f "$download_active" ] &&
+    [ -f "$about_example" ] &&
+    [ -f "$about_active" ] &&
+    [ -f "$ROOT_DIR/config/about/overview.md" ] &&
+    [ -f "$ROOT_DIR/config/about/how-to-use.md" ] &&
+    [ -f "$ROOT_DIR/config/about/configuration.md" ] &&
+    [ -f "$ROOT_DIR/config/about/license.md" ] &&
     cmp -s "$install_active" "$install_example" &&
     cmp -s "$map_active" "$map_example" &&
-    cmp -s "$download_active" "$download_example"
+    cmp -s "$download_active" "$download_example" &&
+    cmp -s "$about_active" "$about_example"
 }
 
 use_quickstart_layer_srids() {

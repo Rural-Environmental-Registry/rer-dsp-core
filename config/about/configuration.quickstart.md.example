@@ -1,0 +1,10 @@
+DSP is designed to be configured by adopters. Labels, hierarchy depth, themes, and KPIs can be adjusted without rewriting the core product.
+
+## Already configurable in this version
+
+- Hierarchy labels (Level 1, Level 2, Level 3) via `GET /config/installation`.
+- Home always uses 2 levels; Downloads always uses 3 levels.
+- Territory options via `GET /territory/options?level=&parentId=`.
+- Home KPIs (up to 5 cards; first card is always area of interest) via installation config.
+- Detail panel fields and labels for identifier search.
+- Download themes and available file formats.
