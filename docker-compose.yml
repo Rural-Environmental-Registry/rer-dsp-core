@@ -117,15 +117,15 @@ services:
         DSP_BACKEND_VERSION: 0.0.1-SNAPSHOT
     container_name: dsp-backend
     restart: unless-stopped
-    ports:
-      - "${DSP_BACKEND_HOST_PORT:-22666}:8080"
+    expose:
+      - "8080"
     volumes:
       - ./config/installation/installation-config.json:/config/installation-config.json:ro
       - ./config/map/mapLayersConfig.json:/config/mapLayersConfig.json:ro
       - ./config/downloads/downloadThemesConfig.json:/config/downloadThemesConfig.json:ro
     environment:
       SERVER_SERVLET_CONTEXT_PATH: ${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}
-      DSP_CORS_ALLOWED_ORIGINS: ${DSP_CORS_ALLOWED_ORIGINS:-http://localhost,http://localhost/dsp,http://localhost:5173,http://localhost:22667}
+      DSP_CORS_ALLOWED_ORIGINS: ${DSP_CORS_ALLOWED_ORIGINS:-http://localhost:8026,http://localhost:5173}
       DSP_INSTALLATION_CONFIG_FILE: ${DSP_INSTALLATION_CONFIG_FILE:-file:/config/installation-config.json}
       DSP_MAP_LAYERS_FILE: ${DSP_MAP_LAYERS_FILE:-file:/config/mapLayersConfig.json}
       DSP_DOWNLOAD_THEMES_FILE: ${DSP_DOWNLOAD_THEMES_FILE:-file:/config/downloadThemesConfig.json}
@@ -148,9 +148,12 @@ services:
       network: host
     container_name: dsp-geoserver-exhibition
     restart: unless-stopped
-    ports:
-      - "${DSP_GEOSERVER_HOST_PORT:-22668}:8080"
+    expose:
+      - "8080"
     environment:
+      # URL pública via gateway, para o GetCapabilities e a UI web gerarem links corretos.
+      # O prefixo externo difere do interno (/geoserver), então isso é obrigatório.
+      PROXY_BASE_URL: ${DSP_PUBLIC_BASE_URL:-http://localhost:8026}/geoserver-exhibition
       GEOSERVER_DATA_DIR: /var/geoserver/datadir
       RUN_UNPRIVILEGED: "true"
       RUN_WITH_USER_UID: "999"
@@ -194,9 +197,11 @@ services:
       network: host
     container_name: dsp-geoserver-download
     restart: unless-stopped
-    ports:
-      - "${DSP_GEOSERVER_DOWNLOAD_HOST_PORT:-22669}:8080"
+    expose:
+      - "8080"
     environment:
+      # Prefixo externo distinto do interno: sem isso os links sairiam apontando para /geoserver.
+      PROXY_BASE_URL: ${DSP_PUBLIC_BASE_URL:-http://localhost:8026}/geoserver-download
       GEOSERVER_DATA_DIR: /var/geoserver/datadir
       RUN_UNPRIVILEGED: "true"
       RUN_WITH_USER_UID: "999"
@@ -240,13 +245,43 @@ services:
       args:
         APP_VERSION: ${APP_VERSION:-0.0.0}
         VITE_BASE_URL: ${VITE_BASE_URL:-/dsp/}
-        VITE_DSP_API_URL: ${VITE_DSP_API_URL:-http://localhost:22666/dsp-backend}
+        VITE_DSP_API_URL: ${VITE_DSP_API_URL:-/dsp-backend}
     container_name: dsp-frontend
     restart: unless-stopped
-    ports:
-      - "${DSP_FRONTEND_HOST_PORT:-22667}:8080"
+    expose:
+      - "8080"
     depends_on:
       - dsp-backend
+    networks:
+      - dsp_network
+
+  # Porta de entrada única: os demais serviços HTTP não publicam porta no host.
+  dsp-gateway:
+    image: nginx:alpine
+    container_name: dsp-gateway
+    restart: unless-stopped
+    ports:
+      - "${DSP_GATEWAY_HOST_PORT:-8026}:8080"
+    environment:
+      # Só as variáveis DSP_* são substituídas no template, para preservar $uri, $host etc.
+      NGINX_ENVSUBST_FILTER: "^DSP_"
+      DSP_BACKEND_CONTEXT_PATH: ${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}
+      DSP_GATEWAY_CACHE_BYPASS: ${DSP_GATEWAY_CACHE_BYPASS-1}
+      DSP_GATEWAY_CACHE_TTL: ${DSP_GATEWAY_CACHE_TTL:-10m}
+    volumes:
+      - ./config/Gateway/nginx:/etc/nginx/templates:ro
+      - dsp_gateway_cache:/var/cache/nginx/dsp
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/gateway/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      - dsp-frontend
+      - dsp-backend
+      - dsp-geoserver-exhibition
+      - dsp-geoserver-download
     networks:
       - dsp_network
 
@@ -260,3 +295,4 @@ volumes:
   dsp_job_migration_db_data:
   dsp_geoserver_exhibition_data:
   dsp_geoserver_download_data:
+  dsp_gateway_cache:

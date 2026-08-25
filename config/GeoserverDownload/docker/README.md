@@ -12,12 +12,18 @@ Shares the same PostGIS database as GeoServer Exhibition (`dsp-geoserver-db`). L
 
 ## Defaults
 
+Não publica porta no host: o acesso externo passa pelo gateway (`config/Gateway/docker`). O backend
+continua chamando o WFS direto pela rede Docker, via `DSP_GEOSERVER_WFS_BASE_URL`.
+
 | Item | Value |
 | --- | --- |
-| Host port | `22669` (`DSP_GEOSERVER_DOWNLOAD_HOST_PORT`) |
-| UI | http://localhost:22669/geoserver/web/ |
-| WFS | http://localhost:22669/geoserver/dsp/wfs |
+| Prefixo no gateway | `/geoserver-download` |
+| UI | http://localhost:8026/geoserver-download/web/ |
+| WFS | http://localhost:8026/geoserver-download/dsp/wfs |
 | Admin | `admin` / `geoserver` (same vars as Exhibition) |
+
+Como o prefixo externo difere do interno (`/geoserver`), o `PROXY_BASE_URL` é obrigatório aqui —
+sem ele os links gerados pelo GeoServer apontariam para o path errado.
 
 ## Published layers
 

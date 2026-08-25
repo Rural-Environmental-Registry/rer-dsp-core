@@ -1,5 +1,5 @@
 {
-  "wfsBaseUrl": "http://localhost:22669/geoserver/dsp/wfs",
+  "wfsBaseUrl": "http://localhost:8026/geoserver-download/dsp/wfs",
   "themes": [
     {
       "code": "area_of_interest",

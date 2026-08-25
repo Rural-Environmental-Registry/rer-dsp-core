@@ -12,12 +12,18 @@ Downloads (CSV/WFS export) use a separate GeoServer — see `config/GeoserverDow
 
 ## Defaults
 
+Não publica porta no host: o acesso externo passa pelo gateway (`config/Gateway/docker`).
+
 | Item | Value |
 | --- | --- |
-| Host port | `22668` (`DSP_GEOSERVER_HOST_PORT`) |
-| UI | http://localhost:22668/geoserver/web/ |
-| WMS | http://localhost:22668/geoserver/dsp/wms |
+| Prefixo no gateway | `/geoserver-exhibition` |
+| UI | http://localhost:8026/geoserver-exhibition/web/ |
+| WMS | http://localhost:8026/geoserver-exhibition/dsp/wms |
 | Admin | `admin` / `geoserver` |
+
+Como o prefixo externo difere do interno (`/geoserver`), o `PROXY_BASE_URL` — derivado de
+`DSP_PUBLIC_BASE_URL` — é obrigatório: sem ele os links do GetCapabilities e da UI web apontariam
+para o path errado.
 
 ## Published layers (fixed)
 
