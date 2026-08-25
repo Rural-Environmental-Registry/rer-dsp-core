@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "bannerTitle": "About",
+  "bannerTitle": "About the DSP",
   "defaultTabId": "overview",
   "tabs": [
     {
@@ -9,9 +9,9 @@
       "file": "overview.md"
     },
     {
-      "id": "how-to-use",
-      "label": "How to use",
-      "file": "how-to-use.md"
+      "id": "features",
+      "label": "Features",
+      "file": "features.md"
     },
     {
       "id": "configuration",

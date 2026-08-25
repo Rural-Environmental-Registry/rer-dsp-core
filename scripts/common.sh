@@ -1489,7 +1489,7 @@ ensure_quickstart_adopter_configs() {
   info "About config set from quickstart template:"
   echo "       $about_active"
 
-  for about_md in overview how-to-use configuration license; do
+  for about_md in overview features configuration license; do
     local about_md_example="$about_dir/${about_md}.quickstart.md.example"
     local about_md_active="$about_dir/${about_md}.md"
     if [ ! -f "$about_md_example" ]; then
@@ -1544,7 +1544,7 @@ is_quickstart_configured() {
     [ -f "$about_example" ] &&
     [ -f "$about_active" ] &&
     [ -f "$ROOT_DIR/config/about/overview.md" ] &&
-    [ -f "$ROOT_DIR/config/about/how-to-use.md" ] &&
+    [ -f "$ROOT_DIR/config/about/features.md" ] &&
     [ -f "$ROOT_DIR/config/about/configuration.md" ] &&
     [ -f "$ROOT_DIR/config/about/license.md" ] &&
     cmp -s "$install_active" "$install_example" &&
