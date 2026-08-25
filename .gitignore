@@ -8,6 +8,9 @@ config/map/mapLayersConfig.json
 config/downloads/downloadThemesConfig.json
 config/Job-Data-Migration/application/application.yaml
 config/adopter/adopter-config.yaml
+config/about/about-config.json
+config/about/*.md
+!config/about/*.md.example
 
 # IDEs
 .idea/

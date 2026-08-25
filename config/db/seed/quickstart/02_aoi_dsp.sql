@@ -8,7 +8,7 @@
 CREATE TABLE IF NOT EXISTS dsp.area_of_interest (
     id                   VARCHAR(255) PRIMARY KEY,
     registration_date    TIMESTAMP NOT NULL,
-    updated_at      TIMESTAMP,
+    updated_at           TIMESTAMP,
     territory_level_3_id VARCHAR(64) REFERENCES dsp.territory_level_3 (id),
     area                 NUMERIC,
     theme_1              NUMERIC,
