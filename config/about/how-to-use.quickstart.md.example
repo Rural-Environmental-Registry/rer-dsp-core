@@ -1,0 +1,16 @@
+## Home
+
+Use Level 2 and Level 3 filters to narrow the data, or enter an identifier to open the record details panel. KPI cards summarize the current selection.
+
+- Select Level 2 (required for location search).
+- Optionally select Level 3 for a more specific result.
+- Or enter an Identifier and click Search to open details.
+
+## Downloads
+
+Choose Level 1, then Level 2. Level 3 and Theme filters appear after Level 2 is selected. Available formats (for example CSV) are listed per theme.
+
+- Click a Level 1 chip to reveal Level 2 options.
+- Click a Level 2 chip to load themes and optional filters.
+- Use Search after changing Level 3 or Theme.
+- Download only formats marked as available.

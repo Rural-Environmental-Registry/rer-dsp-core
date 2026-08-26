@@ -17,7 +17,7 @@ flowchart LR
     Core --> Backend
     Core --> Frontend
     Core --> Job
-    Core -.doc.-> Docs
+    Core --> Docs
 ```
 
 ## Objetivo
@@ -30,7 +30,8 @@ configuração do adotante para toda a stack DSP.
 - Subir e configurar os bancos de dados (`dsp-db`, `dsp-job-migration-db`)
 - Subir o GeoServer de exibição (WMS)
 - Subir o gateway nginx (`dsp-gateway`), porta de entrada única da stack
-- Guiar a configuração do adotante (hierarquia, telas, KPIs, camadas do mapa)
+- Guiar a configuração do adotante (hierarquia, telas, KPIs, camadas do mapa,
+  página About)
 - Orquestrar os demais módulos via Docker Compose
 
 ## Tecnologias

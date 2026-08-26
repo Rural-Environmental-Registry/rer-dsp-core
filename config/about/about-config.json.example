@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "bannerTitle": "About",
+  "defaultTabId": "overview",
+  "tabs": [
+    {
+      "id": "overview",
+      "label": "Overview",
+      "file": "overview.md"
+    },
+    {
+      "id": "how-to-use",
+      "label": "How to use",
+      "file": "how-to-use.md"
+    }
+  ]
+}

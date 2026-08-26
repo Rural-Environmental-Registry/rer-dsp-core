@@ -8,14 +8,24 @@ import copy
 import json
 import os
 import re
+import select
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    import termios
+    import tty
+except ImportError:
+    termios = None
+    tty = None
+
 # URLs consumidas pelo browser, portanto passam pelo gateway (DSP_PUBLIC_BASE_URL no .env).
 PUBLIC_BASE_URL = os.environ.get("DSP_PUBLIC_BASE_URL", "http://localhost:8026").rstrip("/")
 FIXED_WMS_BASE_URL = f"{PUBLIC_BASE_URL}/geoserver-exhibition/dsp/wms"
+FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
 # Downloads use GeoServer Download (separate from map Exhibition WMS).
 FIXED_WFS_BASE_URL = f"{PUBLIC_BASE_URL}/geoserver-download/dsp/wfs"
 HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
@@ -31,6 +41,30 @@ FIXED_LAYER_IDS = {
     "dsp:territory-level-3",
     "dsp:area-of-interest",
 }
+CANONICAL_AOI_DETAIL_FIELDS = (
+    "id",
+    "registration_date",
+    "updated_at",
+    "area",
+)
+CALCULATED_AOI_DETAIL_FIELDS = (
+    "calculated.latitude",
+    "calculated.longitude",
+    "calculated.territory_level_2_name",
+    "calculated.territory_level_3_name",
+)
+FORBIDDEN_AOI_DETAIL_FIELDS = frozenset(
+    {
+        "theme_1",
+        "theme_2",
+        "theme_3",
+        "theme_4",
+        "geom",
+        "geometry",
+        "boundary_box",
+        "centroid_coordinates",
+    }
+)
 
 try:
     import yaml
@@ -40,11 +74,21 @@ except ImportError:
 
 
 class AdopterConfigDumper(yaml.SafeDumper):
-    """Write multiline SQL values as readable YAML folded blocks."""
+    """Write string values in double quotes; keys, numbers, booleans and null unquoted."""
+
+    def represent_mapping(self, tag, mapping, flow_style=None):
+        node = super().represent_mapping(tag, mapping, flow_style)
+        for key_node, _value_node in node.value:
+            if (
+                isinstance(key_node, yaml.ScalarNode)
+                and key_node.tag == "tag:yaml.org,2002:str"
+            ):
+                key_node.style = None
+        return node
 
 
 def represent_multiline_string(dumper: yaml.SafeDumper, value: str) -> yaml.nodes.ScalarNode:
-    style = ">" if "\n" in value else None
+    style = ">" if "\n" in value else '"'
     return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
 
 
@@ -58,6 +102,14 @@ def dump_yaml(data: Any) -> str:
         allow_unicode=True,
         sort_keys=False,
     )
+
+
+def write_adopter_config(
+    path: Path, values: dict[str, Any], template: dict[str, Any]
+) -> None:
+    """Write adopter YAML using the template key order."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(dump_yaml(deep_merge(template, values)), encoding="utf-8")
 
 
 def read_dotenv_value(env_file: Path, key: str, default: str = "") -> str:
@@ -98,10 +150,177 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return merged
 
 
+def _read_clipboard() -> str:
+    """Return clipboard text when a host tool is available."""
+    for cmd in (
+        ["wl-paste", "-n"],
+        ["xclip", "-selection", "clipboard", "-o"],
+        ["xsel", "--clipboard", "--output"],
+        ["pbpaste"],
+    ):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                return result.stdout
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    return ""
+
+
+def _sanitize_pasted_text(text: str) -> str:
+    """Keep wizard answers on one line."""
+    if not text:
+        return ""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized.split("\n", 1)[0]
+
+
+_stdin_pushback: list[str] = []
+
+
+def _read_char() -> str:
+    """Read one stdin character, honoring any pushback from prior reads."""
+    if _stdin_pushback:
+        return _stdin_pushback.pop(0)
+    return sys.stdin.read(1)
+
+
+def _consume_optional_lf() -> None:
+    """Drop a trailing LF after CR so it does not answer the next prompt."""
+    if not select.select([sys.stdin], [], [], 0)[0]:
+        return
+    ch = sys.stdin.read(1)
+    if ch != "\n":
+        _stdin_pushback.append(ch)
+
+
+def _read_bracketed_paste() -> str:
+    """Read terminal bracketed paste payload until ESC [ 201 ~."""
+    parts: list[str] = []
+    while True:
+        ch = _read_char()
+        if ch != "\x1b":
+            parts.append(ch)
+            continue
+        if _read_char() != "[":
+            parts.append("\x1b")
+            continue
+        param = ""
+        while True:
+            code = _read_char()
+            if code == "~":
+                if param == "201":
+                    return "".join(parts)
+                parts.append("\x1b[" + param + "~")
+                break
+            param += code
+
+
+def _read_interactive_line(prompt: str) -> str:
+    """Read one line with arrow keys, backspace/delete and Ctrl+V paste."""
+    if termios is None or tty is None or not sys.stdin.isatty():
+        return input(prompt)
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    buffer: list[str] = []
+    cursor = 0
+
+    def redraw() -> None:
+        sys.stdout.write("\r" + prompt + "".join(buffer))
+        sys.stdout.write("\x1b[K")
+        tail = len(buffer) - cursor
+        if tail:
+            sys.stdout.write(f"\x1b[{tail}D")
+        sys.stdout.flush()
+
+    def insert_text(text: str) -> None:
+        nonlocal cursor
+        if not text:
+            return
+        buffer[cursor:cursor] = list(text)
+        cursor += len(text)
+        redraw()
+
+    def delete_forward() -> None:
+        nonlocal cursor
+        if cursor < len(buffer):
+            del buffer[cursor]
+            redraw()
+
+    def delete_backward() -> None:
+        nonlocal cursor
+        if cursor > 0:
+            del buffer[cursor - 1]
+            cursor -= 1
+            redraw()
+
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+
+    try:
+        tty.setcbreak(fd)
+        while True:
+            ch = _read_char()
+            if ch == "\n":
+                break
+            if ch == "\r":
+                _consume_optional_lf()
+                break
+            if ch == "\x03":
+                raise KeyboardInterrupt
+            if ch == "\x04" and not buffer:
+                break
+            if ch == "\x16":  # Ctrl+V
+                insert_text(_sanitize_pasted_text(_read_clipboard()))
+                continue
+            if ch in ("\x7f", "\x08"):
+                delete_backward()
+                continue
+            if ch == "\x1b":
+                if _read_char() != "[":
+                    continue
+                param = ""
+                while True:
+                    code = _read_char()
+                    if code == "~":
+                        if param == "200":
+                            insert_text(_sanitize_pasted_text(_read_bracketed_paste()))
+                        elif param == "3":
+                            delete_forward()
+                        break
+                    if code.isalpha() and not param:
+                        if code == "D" and cursor > 0:
+                            cursor -= 1
+                            sys.stdout.write("\x1b[D")
+                            sys.stdout.flush()
+                        elif code == "C" and cursor < len(buffer):
+                            cursor += 1
+                            sys.stdout.write("\x1b[C")
+                            sys.stdout.flush()
+                        break
+                    param += code
+                continue
+            if ch.isprintable() or ch == "\t":
+                insert_text(ch)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return "".join(buffer)
+
+
 def ask(label: str, default: Any = "") -> Any:
     suffix = f" [{default}]" if default not in ("", None) else ""
     print(f"{label}{suffix}:")
-    answer = input("  > ").strip()
+    answer = _read_interactive_line("  > ").strip()
     return default if answer == "" else answer
 
 
@@ -251,6 +470,192 @@ def etl_field_help(field: str) -> str:
         ),
     }
     return descriptions.get(field, "Source value used by the ETL mapping.")
+
+
+def aoi_persist_columns(values: dict[str, Any]) -> list[str]:
+    """Extra destination columns selected for AOI migration."""
+    aoi = get(values, "etl", "area_of_interest", default={})
+    raw = aoi.get("persist_columns") if isinstance(aoi, dict) else None
+    return parse_column_list(raw, "etl.area_of_interest.persist_columns")
+
+
+def aoi_detail_field_options(persist_columns: list[str]) -> list[str]:
+    """Valid details-panel keys: persist_columns ∪ canonical ∪ calculated.*."""
+    options: list[str] = []
+    seen: set[str] = set()
+    for name in (
+        list(persist_columns)
+        + list(CANONICAL_AOI_DETAIL_FIELDS)
+        + list(CALCULATED_AOI_DETAIL_FIELDS)
+    ):
+        if name in seen:
+            continue
+        seen.add(name)
+        options.append(name)
+    return options
+
+
+def validate_aoi_detail_fields(
+    values: dict[str, Any],
+    persist_columns: list[str],
+) -> list[dict[str, str]]:
+    """Validate details.fields: AOI migration columns or calculated.* keys."""
+    prefix = "installation.screens.detail.fields"
+    detail = get(values, "installation", "screens", "detail", default={})
+    raw = detail.get("fields") if isinstance(detail, dict) else None
+    if raw is None or raw == []:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{prefix} must be a list of field/label mappings.")
+
+    extras = set(persist_columns)
+    calculated = set(CALCULATED_AOI_DETAIL_FIELDS)
+    seen: set[str] = set()
+    normalized: list[dict[str, str]] = []
+    for index, item in enumerate(raw):
+        item_prefix = f"{prefix}[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{item_prefix} must be a mapping with 'field' and 'label'.")
+        field = item.get("field")
+        label = item.get("label")
+        if not isinstance(field, str) or not field.strip():
+            raise ValueError(f"{item_prefix}.field is required.")
+        field = field.strip()
+        if "<" in field:
+            raise ValueError(f"{item_prefix}.field still contains a placeholder.")
+        if field in seen:
+            raise ValueError(f"{prefix}: duplicate field '{field}'.")
+        seen.add(field)
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"{item_prefix}.label is required.")
+        label = label.strip()
+        if "<" in label:
+            raise ValueError(f"{item_prefix}.label still contains a placeholder.")
+        if field in FORBIDDEN_AOI_DETAIL_FIELDS:
+            raise ValueError(
+                f"{item_prefix}.field '{field}' cannot be shown on the AOI details panel."
+            )
+        if field.startswith("calculated."):
+            if field not in calculated:
+                raise ValueError(
+                    f"{item_prefix}.field '{field}' is not a calculated details field. "
+                    "Use calculated.latitude, calculated.longitude, "
+                    "calculated.territory_level_2_name, or calculated.territory_level_3_name."
+                )
+            normalized.append({"field": field, "label": label})
+            continue
+        if field in CANONICAL_AOI_DETAIL_FIELDS:
+            normalized.append({"field": field, "label": label})
+            continue
+        if field not in extras:
+            raise ValueError(
+                f"{item_prefix}.field '{field}' is not in "
+                "etl.area_of_interest.persist_columns, is not a canonical AOI column "
+                "(id, registration_date, updated_at, area), and is not a calculated "
+                "field (calculated.latitude, calculated.longitude, "
+                "calculated.territory_level_2_name, calculated.territory_level_3_name). "
+                "Select it for AOI migration first, or remove it from details."
+            )
+        normalized.append({"field": field, "label": label})
+    return normalized
+
+
+def ask_aoi_detail_fields(config: dict[str, Any]) -> None:
+    """Prompt for details-panel fields after persist_columns is chosen."""
+    persist = parse_column_list(
+        config["etl"]["area_of_interest"].get("persist_columns") or [],
+        "etl.area_of_interest.persist_columns",
+    )
+    options = aoi_detail_field_options(persist)
+    options_set = set(options)
+    screens = config.setdefault("installation", {}).setdefault("screens", {})
+    detail = screens.setdefault("detail", {})
+    existing = detail.get("fields") or []
+    default_fields: list[str] = []
+    labels_by_field: dict[str, str] = {}
+    if isinstance(existing, list):
+        for item in existing:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("field") or "").strip()
+            if not name:
+                continue
+            default_fields.append(name)
+            existing_label = item.get("label")
+            if isinstance(existing_label, str) and existing_label.strip():
+                labels_by_field[name] = existing_label.strip()
+
+    identifier = screens.get("identifier") if isinstance(screens.get("identifier"), dict) else {}
+    hierarchy = get(config, "installation", "hierarchy", default={})
+    level2 = hierarchy.get("level2") if isinstance(hierarchy, dict) else {}
+    level3 = hierarchy.get("level3") if isinstance(hierarchy, dict) else {}
+    if not isinstance(level2, dict):
+        level2 = {}
+    if not isinstance(level3, dict):
+        level3 = {}
+    canonical_label_defaults = {
+        "id": identifier.get("label") or "Identifier",
+        "registration_date": detail.get("registration_date_label") or "Registration date",
+        "updated_at": detail.get("alteration_date_label") or "Alteration date",
+        "area": detail.get("area_label") or "Area",
+        "calculated.latitude": detail.get("latitude_label") or "Latitude",
+        "calculated.longitude": detail.get("longitude_label") or "Longitude",
+        "calculated.territory_level_2_name": level2.get("label") or "Level 2",
+        "calculated.territory_level_3_name": level3.get("label") or "Level 3",
+    }
+
+    while True:
+        print("\n  AOI details fields")
+        print(
+            "  What: Fields shown on the area of interest details panel, in this order. "
+            "Mix migrated columns with calculated.* keys."
+        )
+        print("  Used in: the home screen detail panel")
+        print(
+            "  calculated.* keys are calculated by the application, not a source column: "
+            + ", ".join(CALCULATED_AOI_DETAIL_FIELDS)
+        )
+        print("  Options: " + ", ".join(options))
+        print("  How: type field names separated by commas (order is kept).")
+        print("  Skip: press Enter to keep the built-in details list.")
+        raw = ask("  Fields", ", ".join(default_fields))
+        text = str(raw or "").strip()
+        if text and "," not in text and any(char.isspace() for char in text):
+            print(
+                "\n  Separate names with commas, not only spaces. "
+                "Example: id, nome, calculated.latitude"
+            )
+            continue
+        try:
+            selected = parse_column_list(text, "installation.screens.detail.fields")
+        except ValueError as exc:
+            print(f"\n  {exc}")
+            continue
+        unknown = [name for name in selected if name not in options_set]
+        if unknown:
+            print(
+                f"\n  These fields are not available: {', '.join(unknown)}. "
+                "Choose only from columns selected for AOI migration, "
+                "canonical columns (id, registration_date, updated_at, area), "
+                "and calculated.* keys."
+            )
+            continue
+        break
+
+    fields: list[dict[str, str]] = []
+    for name in selected:
+        default_label = labels_by_field.get(name) or canonical_label_defaults.get(name) or name
+        help_text = f"Label shown on the details panel for '{name}'."
+        if name.startswith("calculated."):
+            help_text += " This value is calculated by the application, not a source column."
+        label = ask_field(
+            f"AOI details label — {name}",
+            default_label,
+            help_text,
+            "the home screen detail panel",
+        )
+        fields.append({"field": name, "label": str(label).strip()})
+    detail["fields"] = fields
 
 
 def parse_column_list(raw: Any, prefix: str) -> list[str]:
@@ -855,6 +1260,56 @@ def build_extra_map_layer(entry: dict[str, Any], group_json_key: str) -> dict[st
     }
 
 
+def build_about_config(values: dict[str, Any], about_dir: Path) -> dict[str, Any]:
+    """Build about-config.json from about.* adopter settings."""
+    about = get(values, "about", default={}) or {}
+    enabled = bool(about.get("enabled", False))
+    if not enabled:
+        return {"enabled": False, "bannerTitle": "About", "defaultTabId": None, "tabs": []}
+
+    raw_tabs = about.get("tabs")
+    if not isinstance(raw_tabs, list) or not raw_tabs:
+        raise ValueError("about.tabs must have at least one entry when about.enabled is true.")
+
+    tabs: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for index, tab in enumerate(raw_tabs):
+        prefix = f"about.tabs[{index}]"
+        if not isinstance(tab, dict):
+            raise ValueError(f"{prefix} must be a mapping with id, label, and file.")
+        tab_id = tab.get("id")
+        label = tab.get("label")
+        file_name = tab.get("file")
+        if not isinstance(tab_id, str) or not tab_id.strip():
+            raise ValueError(f"{prefix}.id is required.")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"{prefix}.label is required.")
+        if not isinstance(file_name, str) or not file_name.strip():
+            raise ValueError(f"{prefix}.file is required.")
+        tab_id = tab_id.strip()
+        file_name = file_name.strip()
+        if tab_id in seen_ids:
+            raise ValueError(f"about.tabs: duplicate id '{tab_id}'.")
+        seen_ids.add(tab_id)
+        if not (about_dir / file_name).is_file():
+            raise ValueError(
+                f"{prefix}.file '{file_name}' does not exist in {about_dir}. "
+                "Create the Markdown file before running ./config.sh."
+            )
+        tabs.append({"id": tab_id, "label": label.strip(), "file": file_name})
+
+    default_tab_id = about.get("default_tab_id")
+    if default_tab_id not in seen_ids:
+        default_tab_id = tabs[0]["id"]
+
+    return {
+        "enabled": True,
+        "bannerTitle": str(about.get("banner_title") or "About"),
+        "defaultTabId": default_tab_id,
+        "tabs": tabs,
+    }
+
+
 def layer_name_to_code(layer_name: str) -> str:
     return layer_name.replace("-", "_")
 
@@ -960,6 +1415,7 @@ def build_batch_layers(extra_layers: list[dict[str, Any]]) -> list[dict[str, Any
 def apply_screen_text_overrides(
     installation: dict[str, Any],
     screens_yaml: dict[str, Any],
+    aoi_detail_fields: list[dict[str, str]],
 ) -> None:
     """Apply localized screen labels from adopter-config to installation-config."""
     home = installation["screens"]["home"]
@@ -974,9 +1430,9 @@ def apply_screen_text_overrides(
             if "placeholder" in identifier:
                 target["placeholder"] = identifier["placeholder"]
 
+    target = home.setdefault("detail", {})
     detail = screens_yaml.get("detail")
     if isinstance(detail, dict):
-        target = home.setdefault("detail", {})
         for yaml_key, json_key in (
             ("section_title", "sectionTitle"),
             ("area_of_interest_section_title", "areaOfInterestSectionTitle"),
@@ -989,6 +1445,7 @@ def apply_screen_text_overrides(
         ):
             if yaml_key in detail:
                 target[json_key] = detail[yaml_key]
+    target["fields"] = aoi_detail_fields
 
     downloads_yaml = screens_yaml.get("downloads")
     if isinstance(downloads_yaml, dict):
@@ -1166,7 +1623,7 @@ def ask_generic_layer_entry(
             print(f"\n  {exc}")
 
     entry["srid"] = ask_int_field(
-        "Layer SRID", entry.get("srid", 4674),
+        "Layer SRID", entry.get("srid", 4326),
         "Coordinate reference system identifier of the source geometry.",
         "ETL geometry conversion and GeoServer layers",
         minimum=1,
@@ -1256,20 +1713,20 @@ def ask_generic_layers(config: dict[str, Any]) -> None:
 
 def ask_data_preparation_flow() -> bool:
     print("\nBefore configuring a JDBC source, choose the data preparation flow:")
-    print("  1. Quickstart — demonstration data, no JDBC source or migration job")
-    print("  2. Empty databases — real adopter setup without running the migration job")
-    print("  3. Real adopter — configure a JDBC source and continue this wizard")
+    print("  1. Demonstration (built-in seed, no JDBC source or migration job)")
+    print("  2. Real adopter — migrate from JDBC source (ETL)")
+    print("  3. Real adopter — no migration (empty DBs, UI/GeoServer config only)")
 
     while True:
-        choice = ask("Choice", "3")
-        if choice == "3":
+        choice = ask("Choice", "2")
+        if choice == "2":
             return True
         if choice == "1":
-            if ask_bool("Use the Quickstart flow instead", True):
+            if ask_bool("Use the demonstration flow instead", True):
                 print("\nRun ./setup.sh and choose option 1 (Demonstration).")
                 print("This wizard will now exit without configuring a JDBC source.")
                 return False
-        elif choice == "2":
+        elif choice == "3":
             if ask_bool("Use the empty-database flow instead", True):
                 print("\nRun ./setup.sh and choose option 3 (Real adopter — no migration).")
                 print("This wizard will now exit without configuring a JDBC source.")
@@ -1278,8 +1735,42 @@ def ask_data_preparation_flow() -> bool:
             print("Invalid choice. Enter 1, 2, or 3.")
 
 
-def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
+def config_display_path(active: Path, root: Path | None = None) -> str:
+    if root is not None:
+        try:
+            return str(active.resolve().relative_to(root.resolve()))
+        except ValueError:
+            pass
+    return str(active)
+
+
+def ask_existing_config_file(active: Path, config_ref: str) -> bool:
+    print("\nHow do you want to configure the adopter?")
+    print("  1. Guided configuration")
+    print("     Create adopter-config.yaml step by step.")
+    print("  2. Existing configuration")
+    print("     Use an existing adopter-config.yaml file.")
+
+    while True:
+        choice = ask("Choice", "1")
+        if choice == "1":
+            print("\nThe wizard will save your answers when you finish.")
+            print(
+                "You can edit that YAML manually at any time; run ./config.sh "
+                "and choose 1 (reapply) to regenerate the operational files."
+            )
+            return True
+        if choice == "2":
+            print(f"\nPlace your adopter-config.yaml at:\n  {config_ref}")
+            print("You can edit that file manually whenever you need.")
+            print("When ready, run ./config.sh and choose 1 (reapply).")
+            return False
+        print("Invalid choice. Enter 1 or 2.")
+
+
+def wizard(example: Path, active: Path, *, edit: bool = False, root: Path | None = None) -> bool:
     print()
+    config_ref = config_display_path(active, root)
     template = yaml.safe_load(example.read_text(encoding="utf-8"))
     if edit:
         if not active.is_file():
@@ -1293,15 +1784,16 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         print("Press Enter to keep the displayed value.")
     else:
         config = copy.deepcopy(template)
-        print("Guided adopter configuration")
         print("Each stage explains the field and where its value is used.")
         print("Values between brackets are default/example values.")
         print("Press Enter to accept the displayed default/example value.")
         if not ask_data_preparation_flow():
             return False
+        if not ask_existing_config_file(active, config_ref):
+            return False
 
     print("\n" + "=" * 72)
-    print("Stage 1/5 — Source database and spatial reference")
+    print("Stage 1/4 — Source database and spatial reference")
     print("=" * 72)
     env = config["environment"]
     env["source_jdbc_url"] = ask_field(
@@ -1333,30 +1825,8 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         )
 
     print("\n" + "=" * 72)
-    print("Stage 2/5 — Application text and KPI selection")
+    print("Stage 2/4 — Source tables, columns, and migration jobs")
     print("=" * 72)
-    for level in ("level1", "level2", "level3"):
-        section = config["installation"]["hierarchy"][level]
-        section["label"] = ask_field(
-            f"Displayed name for {level}", section["label"],
-            "Name shown to users for this hierarchy level.",
-            "filters, downloads, and detail screens",
-        )
-        section["placeholder"] = ask_field(
-            f"Selection text for {level}", section["placeholder"],
-            "Text shown when the user has not selected this level.",
-            "hierarchy filter controls",
-        )
-    screens = config["installation"]["screens"]
-    screens["home_title"] = ask_field(
-        "Home screen title", screens["home_title"],
-        "Title displayed above the registration search screen.", "the home screen",
-    )
-    screens["downloads_title"] = ask_field(
-        "Downloads screen title", screens["downloads_title"],
-        "Title displayed above the public downloads screen.", "the downloads screen",
-    )
-    ask_screen_text_fields(screens)
     theme_count = ask_int_field(
         "Number of theme KPIs (0-4)", config["installation"]["kpis"]["theme_count"],
         "Number of optional theme measurements available in the source data. "
@@ -1368,93 +1838,6 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
     )
     config["installation"]["kpis"]["theme_count"] = theme_count
     reset_disabled_themes(config, template, theme_count)
-    for code in ("area_of_interest", "theme_1", "theme_2", "theme_3", "theme_4"):
-        card = config["installation"]["kpis"][code]
-        if code != "area_of_interest" and not card["enabled"]:
-            continue
-        card["label"] = ask_field(
-            f"KPI label for {code}", card["label"],
-            "Human-readable name shown on the KPI card.", "the application dashboard",
-        )
-        card["unit_of_measurement"] = ask_field(
-            f"KPI unit for {code}", card["unit_of_measurement"],
-            "Unit displayed beside the KPI value.", "the application dashboard",
-        )
-        if code == "area_of_interest":
-            card["optional_label"] = ask_field(
-                "KPI optional label for area_of_interest", card["optional_label"],
-                "Secondary unit shown for the area sum (e.g. ha).",
-                "the AREA_OF_INTEREST KPI card",
-            )
-    area = config["installation"]["area"]
-    area["unit"] = ask_field(
-        "Area unit code", area["unit"],
-        "Short code for the area measurement (e.g. ha, m²).",
-        "area labels and KPI subtotals",
-    )
-    area["unit_label"] = ask_field(
-        "Area unit label", area["unit_label"],
-        "Label shown beside area values in the UI.",
-        "detail screens and downloads",
-    )
-    formats = config["installation"]["formats"]
-    formats["date"] = ask_field(
-        "Date format", formats["date"],
-        "Pattern for dates without time (Java-style, e.g. dd/MM/yyyy).",
-        "lists and detail screens",
-    )
-    formats["date_time"] = ask_field(
-        "Date-time format", formats["date_time"],
-        "Pattern for dates with time (e.g. dd/MM/yyyy HH:mm).",
-        "detail screens",
-    )
-
-    print("\n" + "=" * 72)
-    print("Stage 3/5 — KPI colors and map layers")
-    print("=" * 72)
-    ask_kpi_accent_colors(config, theme_count)
-    ask_map_initial_view(config)
-    group_names = config["map"]["group_names"]
-    group_names["territorial_division"] = ask_field(
-        "Map group name — territorial division", group_names["territorial_division"],
-        "Title of the territorial hierarchy layer group in the map.",
-        "the map layer selector",
-    )
-    group_names["areas_of_interest"] = ask_field(
-        "Map group name — areas of interest", group_names["areas_of_interest"],
-        "Title of the declared areas layer group in the map.",
-        "the map layer selector",
-    )
-    sync_map_layer_names(config)
-    for layer_name, layer in config["map"]["layers"].items():
-        print(f"\n  Layer name for {layer_name}")
-        print("  What: Same display name defined in the previous stage.")
-        print("  Used in: the map layer selector")
-        print(f"  Value: {layer['name']}")
-        print(f"\n  WMS URL for {layer_name}")
-        print("  What: Fixed GeoServer WMS endpoint serving this layer.")
-        print("  Used in: the map client and GeoServer requests")
-        print(f"  Value: {FIXED_WMS_BASE_URL}")
-        layer["active_default"] = ask_bool_field(
-            f"Enable {layer_name} by default", layer["active_default"],
-            "Whether the layer starts enabled when the map opens.",
-            "the initial map state",
-        )
-        layer["color"] = ask_color_field(
-            f"Stroke color for {layer_name}", layer["color"],
-            "Line color used to draw the layer boundary.",
-            "the map and generated GeoServer style",
-        )
-        layer["fill_color"] = ask_color_field(
-            f"Fill color for {layer_name}", layer["fill_color"],
-            "Fill color used inside the layer; use transparent when needed.",
-            "the map and generated GeoServer style",
-            allow_transparent=True,
-        )
-
-    print("\n" + "=" * 72)
-    print("Stage 4/5 — Source tables and columns")
-    print("=" * 72)
     for name, fields in (
         ("level1", ("source_table", "primary_key", "name_column", "geometry_column", "updated_at_column")),
         (
@@ -1507,9 +1890,6 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
             "the ETL source query",
         )
 
-    print("\n" + "=" * 72)
-    print("Stage 5/5 — Migration jobs")
-    print("=" * 72)
     for name in ("level1", "level2", "level3", "area_of_interest"):
         config["etl"]["jobs"][name] = ask_bool_field(
             f"Run {name} job", config["etl"]["jobs"][name],
@@ -1518,7 +1898,7 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         )
     config["etl"]["jobs"]["layer_jobs"] = ask_bool_field(
         "Run generic layer jobs",
-        bool(config["etl"]["jobs"].get("layer_jobs", False)),
+        bool(config["etl"]["jobs"].get("layer_jobs", True)),
         "Whether extra layers (etl.layers) should be migrated and published.",
         "the ETL execution plan",
     )
@@ -1538,13 +1918,217 @@ def wizard(example: Path, active: Path, *, edit: bool = False) -> bool:
         "in downloadThemesConfig.json."
     )
 
-    active.parent.mkdir(parents=True, exist_ok=True)
-    active.write_text(
-        dump_yaml(config),
-        encoding="utf-8",
+    print("\n" + "=" * 72)
+    print("Stage 3/4 — Application settings")
+    print("=" * 72)
+    for code in ("area_of_interest", "theme_1", "theme_2", "theme_3", "theme_4"):
+        card = config["installation"]["kpis"][code]
+        if code != "area_of_interest" and not card["enabled"]:
+            continue
+        card["label"] = ask_field(
+            f"KPI label for {code}", card["label"],
+            "Human-readable name shown on the KPI card.", "the application dashboard",
+        )
+        card["unit_of_measurement"] = ask_field(
+            f"KPI unit for {code}", card["unit_of_measurement"],
+            "Unit displayed beside the KPI value.", "the application dashboard",
+        )
+        if code == "area_of_interest":
+            card["optional_label"] = ask_field(
+                "KPI optional label for area_of_interest", card["optional_label"],
+                "Secondary unit shown for the area sum (e.g. ha).",
+                "the AREA_OF_INTEREST KPI card",
+            )
+    area = config["installation"]["area"]
+    area["unit"] = ask_field(
+        "Area unit code", area["unit"],
+        "Short code for the area measurement (e.g. ha, m²).",
+        "area labels and KPI subtotals",
     )
+    area["unit_label"] = ask_field(
+        "Area unit label", area["unit_label"],
+        "Label shown beside area values in the UI.",
+        "detail screens and downloads",
+    )
+    formats = config["installation"]["formats"]
+    formats["date"] = ask_field(
+        "Date format", formats["date"],
+        "Pattern for dates without time (Java-style, e.g. dd/MM/yyyy).",
+        "lists and detail screens",
+    )
+    formats["date_time"] = ask_field(
+        "Date-time format", formats["date_time"],
+        "Pattern for dates with time (e.g. dd/MM/yyyy HH:mm).",
+        "detail screens",
+    )
+
+    print("\n" + "=" * 72)
+    print("Stage 4/4 — Interface")
+    print("=" * 72)
+    for level in ("level1", "level2", "level3"):
+        section = config["installation"]["hierarchy"][level]
+        section["label"] = ask_field(
+            f"Displayed name for {level}", section["label"],
+            "Name shown to users for this hierarchy level.",
+            "filters, downloads, and detail screens",
+        )
+        section["placeholder"] = ask_field(
+            f"Selection text for {level}", section["placeholder"],
+            "Text shown when the user has not selected this level.",
+            "hierarchy filter controls",
+        )
+    screens = config["installation"]["screens"]
+    screens["home_title"] = ask_field(
+        "Home screen title", screens["home_title"],
+        "Title displayed above the registration search screen.", "the home screen",
+    )
+    screens["downloads_title"] = ask_field(
+        "Downloads screen title", screens["downloads_title"],
+        "Title displayed above the public downloads screen.", "the downloads screen",
+    )
+    ask_screen_text_fields(screens)
+    ask_aoi_detail_fields(config)
+    ask_kpi_accent_colors(config, theme_count)
+    ask_map_initial_view(config)
+    group_names = config["map"]["group_names"]
+    group_names["territorial_division"] = ask_field(
+        "Map group name — territorial division", group_names["territorial_division"],
+        "Title of the territorial hierarchy layer group in the map.",
+        "the map layer selector",
+    )
+    group_names["areas_of_interest"] = ask_field(
+        "Map group name — areas of interest", group_names["areas_of_interest"],
+        "Title of the declared areas layer group in the map.",
+        "the map layer selector",
+    )
+    sync_map_layer_names(config)
+    for layer_name, layer in config["map"]["layers"].items():
+        print(f"\n  Layer name for {layer_name}")
+        print("  What: Same display name defined earlier in this wizard.")
+        print("  Used in: the map layer selector")
+        print(f"  Value: {layer['name']}")
+        print(f"\n  WMS URL for {layer_name}")
+        print("  What: Fixed GeoServer WMS endpoint serving this layer.")
+        print("  Used in: the map client and GeoServer requests")
+        print(f"  Value: {FIXED_WMS_BASE_URL}")
+        layer["active_default"] = ask_bool_field(
+            f"Enable {layer_name} by default", layer["active_default"],
+            "Whether the layer starts enabled when the map opens.",
+            "the initial map state",
+        )
+        layer["color"] = ask_color_field(
+            f"Stroke color for {layer_name}", layer["color"],
+            "Line color used to draw the layer boundary.",
+            "the map and generated GeoServer style",
+        )
+        layer["fill_color"] = ask_color_field(
+            f"Fill color for {layer_name}", layer["fill_color"],
+            "Fill color used inside the layer; use transparent when needed.",
+            "the map and generated GeoServer style",
+            allow_transparent=True,
+        )
+
+    ask_about_page(config, example.parent.parent / "about")
+
+    write_adopter_config(active, config, template)
     print(f"\nConfiguration saved to {active}")
     return True
+
+
+ABOUT_MAX_TABS = 8
+
+
+def ask_about_page(config: dict[str, Any], about_dir: Path) -> None:
+    """Configure the optional custom About page (about.enabled + tabs)."""
+    about = config.setdefault("about", {})
+    print("\n" + "=" * 72)
+    print("Optional — Custom About page")
+    print("=" * 72)
+    print("  What: Replaces the built-in About page with tabs rendered from")
+    print(f"        Markdown files in {about_dir}")
+    print("  Used in: the frontend About page")
+    enabled = ask_bool(
+        "Enable a custom About page", bool(about.get("enabled", False))
+    )
+    about["enabled"] = enabled
+    if not enabled:
+        return
+
+    tab_count = ask_int_field(
+        "Number of About tabs",
+        len(about.get("tabs") or []) or 1,
+        "How many tabs the About page will show.",
+        "the frontend About page",
+        minimum=1,
+        maximum=ABOUT_MAX_TABS,
+    )
+
+    existing_tabs = about.get("tabs") or []
+    tabs: list[dict[str, str]] = []
+    for index in range(tab_count):
+        existing = existing_tabs[index] if index < len(existing_tabs) else {}
+        default_id = existing.get("id") or f"tab-{index + 1}"
+        default_label = existing.get("label") or f"Tab {index + 1}"
+        default_file = existing.get("file") or ""
+
+        tab_id = ask_field(
+            f"About tab {index + 1} — id",
+            default_id,
+            "Unique identifier for this tab (used by the frontend).",
+            "the frontend About page",
+        )
+        label = ask_field(
+            f"About tab {index + 1} — label",
+            default_label,
+            "Text shown on the tab.",
+            "the frontend About page",
+        )
+        while True:
+            file_name = str(
+                ask_field(
+                    f"About tab {index + 1} — Markdown file",
+                    default_file or "overview.md",
+                    f"File name relative to {about_dir} (must already exist there).",
+                    "the frontend About page",
+                )
+            ).strip()
+            if not file_name or "<" in file_name:
+                print("\n  Enter a file name (e.g. overview.md).")
+                continue
+            if not (about_dir / file_name).is_file():
+                print(
+                    f"\n  File not found: {about_dir / file_name}. "
+                    f"Create it in {about_dir} first (see the .md.example files there)."
+                )
+                continue
+            break
+        tabs.append({"id": str(tab_id).strip(), "label": str(label).strip(), "file": file_name})
+
+    ids = [tab["id"] for tab in tabs]
+    if len(set(ids)) != len(ids):
+        raise ValueError("about.tabs ids must be unique.")
+
+    about["tabs"] = tabs
+    default_tab_id = about.get("default_tab_id")
+    if default_tab_id not in ids:
+        default_tab_id = ids[0]
+    about["default_tab_id"] = ask_field(
+        "About page — default tab id",
+        default_tab_id,
+        "Tab id shown by default when the About page opens.",
+        "the frontend About page",
+    )
+    if about["default_tab_id"] not in ids:
+        raise ValueError(
+            f"about.default_tab_id '{about['default_tab_id']}' must match one of the tab ids: "
+            + ", ".join(ids)
+        )
+    about["banner_title"] = ask_field(
+        "About page — banner title",
+        about.get("banner_title", "About"),
+        "Title shown at the top of the About page.",
+        "the frontend About page",
+    )
 
 
 def replace_env(env_file: Path, values: dict[str, Any]) -> None:
@@ -1656,7 +2240,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     config_changed = sync_map_layer_names(values) or config_changed
     config_changed = normalize_adopter_layer_field_aliases(values) or config_changed
     if config_changed:
-        active.write_text(dump_yaml(values), encoding="utf-8")
+        write_adopter_config(active, values, template)
     source_values = []
     for entity in ("level1", "level2", "level3", "area_of_interest"):
         entity_values = get(values, "etl", entity, default={})
@@ -1693,8 +2277,10 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
                 f"map.layers.{layer_name}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
             )
     extra_layers = validate_extra_layers(values)
+    persist_columns = aoi_persist_columns(values)
+    aoi_detail_fields = validate_aoi_detail_fields(values, persist_columns)
     if coerce_map_initial_view_to_planet(values):
-        active.write_text(dump_yaml(values), encoding="utf-8")
+        write_adopter_config(active, values, template)
     map_initial_view = validate_map_initial_view(values)
     kpis = get(values, "installation", "kpis", default={})
     for code in enabled_kpi_codes(theme_count):
@@ -1703,11 +2289,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             raise ValueError(
                 f"installation.kpis.{code}.accent_color must be a #RGB or #RRGGBB value."
             )
-    if any(
-        "\n" in str(get(values, "etl", entity, "source_table", default=""))
-        for entity in ("level1", "level2", "level3", "area_of_interest")
-    ):
-        active.write_text(dump_yaml(values), encoding="utf-8")
+    write_adopter_config(active, values, template)
     installation = json.loads(
         (root / "config/installation/installation-config.json.example").read_text(
             encoding="utf-8"
@@ -1725,7 +2307,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     installation["screens"]["downloads"]["title"] = screens.get(
         "downloads_title", installation["screens"]["downloads"]["title"]
     )
-    apply_screen_text_overrides(installation, screens)
+    apply_screen_text_overrides(installation, screens, aoi_detail_fields)
     cards = get(values, "installation", "kpis", default={})
     configured_cards = []
     for card in installation["kpis"]["cards"]:
@@ -1786,6 +2368,8 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             ):
                 if source in override:
                     layer[target] = override[source]
+                    if target == "activeDefault":
+                        layer["active"] = override[source]
             layer.setdefault("style", {})["color"] = override.get(
                 "color", layer["style"]["color"]
             )
@@ -1806,6 +2390,12 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
     download_file.write_text(
         json.dumps(download_themes, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+    )
+
+    about_config = build_about_config(values, root / "config/about")
+    about_file = root / "config/about/about-config.json"
+    about_file.write_text(
+        json.dumps(about_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
     migration_example = root / "config/Job-Data-Migration/application/application.yaml.example"
@@ -1843,10 +2433,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             "where-clause": aoi_values.get("where_clause") or "1=1",
         }
     )
-    extras = parse_column_list(
-        aoi_values.get("persist_columns"),
-        "etl.area_of_interest.persist_columns",
-    )
+    extras = persist_columns
     canonical_source = {
         aoi["primary-key"],
         aoi["creation-date-column"],
@@ -1880,7 +2467,6 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         if source in canonical_source or source in extras:
             raise ValueError(
                 f"etl.area_of_interest.theme_{index}_column '{source}' duplicates "
-                "a required or extra persist column."
             )
         if source in aoi["business-only-persist-columns"]:
             raise ValueError(
@@ -1938,7 +2524,7 @@ def main() -> None:
         raise SystemExit(1)
     if args.wizard:
         try:
-            if not wizard(example, active, edit=args.edit):
+            if not wizard(example, active, edit=args.edit, root=args.root):
                 return
         except ValueError as error:
             print(f"\nConfiguration error: {error}", file=sys.stderr)
