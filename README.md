@@ -22,20 +22,21 @@ flowchart LR
 
 ## Objetivo
 
-Orquestra, via Docker Compose, os bancos de dados (PostgreSQL/PostGIS), o GeoServer e a
+Orquestra, via Docker Compose, os bancos de dados (PostgreSQL/PostGIS), o GeoServer, o gateway e a
 configuração do adotante para toda a stack DSP.
 
 ## Responsabilidades
 
 - Subir e configurar os bancos de dados (`dsp-db`, `dsp-job-migration-db`)
 - Subir o GeoServer de exibição (WMS)
+- Subir o gateway nginx (`dsp-gateway`), porta de entrada única da stack
 - Guiar a configuração do adotante (hierarquia, telas, KPIs, camadas do mapa,
   página About)
 - Orquestrar os demais módulos via Docker Compose
 
 ## Tecnologias
 
-Docker Compose, PostgreSQL/PostGIS, GeoServer, Bash, Python.
+Docker Compose, PostgreSQL/PostGIS, GeoServer, nginx, Bash, Python.
 
 ## Pré-requisitos
 
@@ -59,6 +60,17 @@ cd rer-dsp-core
 ./setup.sh
 ./start.sh
 ```
+
+Ao final, tudo é acessível por uma única porta (default `8026`):
+
+| Serviço | URL |
+|---------|-----|
+| Frontend | http://localhost:8026/dsp/ |
+| Backend API | http://localhost:8026/dsp-backend |
+| GeoServer Exhibition | http://localhost:8026/geoserver-exhibition/web/ |
+| GeoServer Download | http://localhost:8026/geoserver-download/web/ |
+
+Detalhes de rotas e cache: [`config/Gateway/docker/README.md`](config/Gateway/docker/README.md).
 
 Estrutura esperada após o setup (layout padrão):
 
