@@ -9,7 +9,7 @@
       },
       "layers": [
         {
-          "baseUrl": "http://localhost:22668/geoserver/dsp/wms",
+          "baseUrl": "http://localhost:8026/geoserver-exhibition/dsp/wms",
           "layers": "dsp:territory-level-1",
           "format": "image/png",
           "transparent": true,
@@ -27,7 +27,7 @@
           }
         },
         {
-          "baseUrl": "http://localhost:22668/geoserver/dsp/wms",
+          "baseUrl": "http://localhost:8026/geoserver-exhibition/dsp/wms",
           "layers": "dsp:territory-level-2",
           "format": "image/png",
           "transparent": true,
@@ -45,7 +45,7 @@
           }
         },
         {
-          "baseUrl": "http://localhost:22668/geoserver/dsp/wms",
+          "baseUrl": "http://localhost:8026/geoserver-exhibition/dsp/wms",
           "layers": "dsp:territory-level-3",
           "format": "image/png",
           "transparent": true,
@@ -73,7 +73,7 @@
       },
       "layers": [
         {
-          "baseUrl": "http://localhost:22668/geoserver/dsp/wms",
+          "baseUrl": "http://localhost:8026/geoserver-exhibition/dsp/wms",
           "layers": "dsp:area-of-interest",
           "format": "image/png",
           "transparent": true,

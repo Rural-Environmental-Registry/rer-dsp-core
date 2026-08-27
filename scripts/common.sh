@@ -15,12 +15,31 @@ STACK_REQUIRED_SERVICES=(
   dsp-geoserver-download
   dsp-backend
   dsp-frontend
+  dsp-gateway
 )
 
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 ok() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Base pública da stack (gateway). DSP_PUBLIC_BASE_URL tem precedência; sem ela,
+# monta a URL a partir do host e da porta do gateway, omitindo a porta 80.
+dsp_public_base_url() {
+  if [ -n "${DSP_PUBLIC_BASE_URL:-}" ]; then
+    echo "${DSP_PUBLIC_BASE_URL%/}"
+    return
+  fi
+
+  local host="${DSP_HTTP_HOST:-localhost}"
+  local port="${DSP_GATEWAY_HOST_PORT:-8026}"
+
+  if [ "$port" = "80" ]; then
+    echo "http://${host}"
+  else
+    echo "http://${host}:${port}"
+  fi
+}
 
 prompt_yes_no() {
   local prompt="$1"
@@ -249,6 +268,24 @@ ensure_download_themes_config() {
 
   print_download_themes_preview "$active"
   validate_download_themes_config "$active"
+  warn_urls_outside_gateway "$active" "Download themes config"
+}
+
+# As URLs de WMS/WFS são consumidas pelo browser e precisam apontar para o gateway.
+# Configs gerados antes do gateway ainda trazem as portas antigas e quebram o mapa em silêncio.
+warn_urls_outside_gateway() {
+  local cfg="$1"
+  local label="$2"
+  local base_url
+  base_url="$(dsp_public_base_url)"
+
+  [ -f "$cfg" ] || return 0
+
+  if grep -oE 'https?://[^"]+/geoserver[^"]*' "$cfg" \
+      | grep -qv "^${base_url}/geoserver"; then
+    warn "${label}: there are GeoServer URLs outside the gateway (${base_url})."
+    warn "Run ./config.sh to regenerate them, or fix baseUrl/wfsBaseUrl by hand."
+  fi
 }
 
 validate_map_layers_wms_ids() {
@@ -358,21 +395,18 @@ ensure_map_layers_config() {
 
   print_map_layers_preview "$active"
   validate_map_layers_wms_ids "$active"
+  warn_urls_outside_gateway "$active" "Map layers config"
 }
 
+# Checa a REST API por dentro do container: os GeoServers não publicam porta no host,
+# o acesso externo passa pelo gateway (que sobe depois deles).
 wait_for_geoserver() {
-  local url="$1"
+  local compose_service="${1:-dsp-geoserver-exhibition}"
   local user="$2"
   local password="$3"
-  local compose_service="${4:-dsp-geoserver-exhibition}"
   local i
   for i in $(seq 1 60); do
-    if command -v curl >/dev/null 2>&1; then
-      if curl -sf -u "${user}:${password}" \
-          "${url}/rest/about/version.json" >/dev/null 2>&1; then
-        return 0
-      fi
-    elif docker compose --env-file .env exec -T "$compose_service" \
+    if docker compose --env-file .env exec -T "$compose_service" \
         curl -sf -u "${user}:${password}" \
         "http://localhost:8080/geoserver/rest/about/version.json" >/dev/null 2>&1; then
       return 0
@@ -983,6 +1017,31 @@ ensure_dotenv() {
   # shellcheck disable=SC1091
   source .env
   set +a
+
+  migrate_dotenv_to_gateway
+}
+
+# .env anteriores ao gateway apontam o frontend para uma porta que não existe mais.
+# Só reescreve valores que vieram do .env.example antigo, preservando o que o adotante ajustou.
+migrate_dotenv_to_gateway() {
+  local migrated=false
+
+  if [ -z "${DSP_PUBLIC_BASE_URL:-}" ]; then
+    set_env_var DSP_PUBLIC_BASE_URL "$(dsp_public_base_url)"
+    migrated=true
+  fi
+
+  case "${VITE_DSP_API_URL:-}" in
+    *:22666*)
+      set_env_var VITE_DSP_API_URL "${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
+      migrated=true
+      ;;
+  esac
+
+  if [ "$migrated" = "true" ]; then
+    warn ".env updated for the gateway (single entry point)."
+    warn "Run ./config.sh to regenerate the WMS/WFS URLs in the map and download configs."
+  fi
 }
 
 set_env_var() {
@@ -1489,7 +1548,7 @@ ensure_quickstart_adopter_configs() {
   info "About config set from quickstart template:"
   echo "       $about_active"
 
-  for about_md in overview how-to-use configuration license; do
+  for about_md in overview features configuration license; do
     local about_md_example="$about_dir/${about_md}.quickstart.md.example"
     local about_md_active="$about_dir/${about_md}.md"
     if [ ! -f "$about_md_example" ]; then
@@ -1544,7 +1603,7 @@ is_quickstart_configured() {
     [ -f "$about_example" ] &&
     [ -f "$about_active" ] &&
     [ -f "$ROOT_DIR/config/about/overview.md" ] &&
-    [ -f "$ROOT_DIR/config/about/how-to-use.md" ] &&
+    [ -f "$ROOT_DIR/config/about/features.md" ] &&
     [ -f "$ROOT_DIR/config/about/configuration.md" ] &&
     [ -f "$ROOT_DIR/config/about/license.md" ] &&
     cmp -s "$install_active" "$install_example" &&
@@ -1642,14 +1701,13 @@ start_geoserver_exhibition() {
   fi
   ok "GeoServer Exhibition container started"
 
-  GEOSERVER_HOST_PORT="${DSP_GEOSERVER_HOST_PORT:-22668}"
-  GEOSERVER_PUBLIC_URL="http://${DSP_HTTP_HOST:-localhost}:${GEOSERVER_HOST_PORT}/geoserver"
+  GEOSERVER_PUBLIC_URL="$(dsp_public_base_url)/geoserver-exhibition"
   GEOSERVER_ADMIN_USER="${DSP_GEOSERVER_ADMIN_USER:-admin}"
   GEOSERVER_ADMIN_PASSWORD="${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}"
 
-  info "Waiting for GeoServer Exhibition REST API at ${GEOSERVER_PUBLIC_URL} ..."
-  if ! wait_for_geoserver "$GEOSERVER_PUBLIC_URL" "$GEOSERVER_ADMIN_USER" "$GEOSERVER_ADMIN_PASSWORD" \
-      "dsp-geoserver-exhibition"; then
+  info "Waiting for GeoServer Exhibition REST API (dsp-geoserver-exhibition) ..."
+  if ! wait_for_geoserver "dsp-geoserver-exhibition" \
+      "$GEOSERVER_ADMIN_USER" "$GEOSERVER_ADMIN_PASSWORD"; then
     error "GeoServer Exhibition did not become ready in time."
     docker compose --env-file .env logs --tail 80 dsp-geoserver-exhibition || true
     exit 1
@@ -1675,14 +1733,13 @@ start_geoserver_download() {
   fi
   ok "GeoServer Download container started"
 
-  GEOSERVER_DOWNLOAD_HOST_PORT="${DSP_GEOSERVER_DOWNLOAD_HOST_PORT:-22669}"
-  GEOSERVER_DOWNLOAD_PUBLIC_URL="http://${DSP_HTTP_HOST:-localhost}:${GEOSERVER_DOWNLOAD_HOST_PORT}/geoserver"
+  GEOSERVER_DOWNLOAD_PUBLIC_URL="$(dsp_public_base_url)/geoserver-download"
   GEOSERVER_ADMIN_USER="${DSP_GEOSERVER_ADMIN_USER:-admin}"
   GEOSERVER_ADMIN_PASSWORD="${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}"
 
-  info "Waiting for GeoServer Download REST API at ${GEOSERVER_DOWNLOAD_PUBLIC_URL} ..."
-  if ! wait_for_geoserver "$GEOSERVER_DOWNLOAD_PUBLIC_URL" "$GEOSERVER_ADMIN_USER" "$GEOSERVER_ADMIN_PASSWORD" \
-      "dsp-geoserver-download"; then
+  info "Waiting for GeoServer Download REST API (dsp-geoserver-download) ..."
+  if ! wait_for_geoserver "dsp-geoserver-download" \
+      "$GEOSERVER_ADMIN_USER" "$GEOSERVER_ADMIN_PASSWORD"; then
     error "GeoServer Download did not become ready in time."
     docker compose --env-file .env logs --tail 80 dsp-geoserver-download || true
     exit 1
@@ -1696,13 +1753,44 @@ start_geoserver_download() {
   fi
 }
 
+start_gateway() {
+  local base_url
+  base_url="$(dsp_public_base_url)"
+  local i
+
+  info "Starting gateway (nginx)..."
+  docker compose --env-file .env up -d dsp-gateway
+  ok "Gateway container started"
+
+  info "Waiting for the gateway at ${base_url}/gateway/health ..."
+  for i in $(seq 1 20); do
+    if docker compose --env-file .env exec -T dsp-gateway \
+        wget -q -O /dev/null http://localhost:8080/gateway/health >/dev/null 2>&1; then
+      ok "Gateway is ready"
+      if [ -n "${DSP_GATEWAY_CACHE_BYPASS-1}" ]; then
+        info "nginx cache is off (DSP_GATEWAY_CACHE_BYPASS=${DSP_GATEWAY_CACHE_BYPASS-1}). Leave it empty in .env to enable."
+      else
+        info "nginx cache is on (TTL ${DSP_GATEWAY_CACHE_TTL:-10m}) for the GeoServer routes."
+      fi
+      return 0
+    fi
+    sleep 2
+  done
+
+  error "Gateway did not become ready in time."
+  docker compose --env-file .env logs --tail 80 dsp-gateway || true
+  exit 1
+}
+
 print_stack_urls() {
   local show_status="${1:-}"
-  local geoserver_url="${GEOSERVER_PUBLIC_URL:-http://${DSP_HTTP_HOST:-localhost}:${DSP_GEOSERVER_HOST_PORT:-22668}/geoserver}"
-  local geoserver_download_url="${GEOSERVER_DOWNLOAD_PUBLIC_URL:-http://${DSP_HTTP_HOST:-localhost}:${DSP_GEOSERVER_DOWNLOAD_HOST_PORT:-22669}/geoserver}"
+  local base_url
+  base_url="$(dsp_public_base_url)"
+  local geoserver_url="${base_url}/geoserver-exhibition"
+  local geoserver_download_url="${base_url}/geoserver-download"
   local http_host="${DSP_HTTP_HOST:-localhost}"
-  local frontend_url="http://${http_host}:${DSP_FRONTEND_HOST_PORT:-22667}${VITE_BASE_URL:-/dsp/}"
-  local backend_url="http://${http_host}:${DSP_BACKEND_HOST_PORT:-22666}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
+  local frontend_url="${base_url}${VITE_BASE_URL:-/dsp/}"
+  local backend_url="${base_url}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
   local svc_status=""
   local migration_db_url="${http_host}:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
 
@@ -1710,6 +1798,8 @@ print_stack_urls() {
 
   if [ "$show_status" = "with-status" ]; then
     echo ""
+    svc_status="$(stack_service_status dsp-gateway)"
+    print_stack_url_line "Gateway" "$svc_status" "${base_url}/gateway/health"
     svc_status="$(stack_service_status dsp-frontend)"
     print_stack_url_line "Frontend" "$svc_status" "$frontend_url"
     svc_status="$(stack_service_status dsp-backend)"
@@ -1738,6 +1828,7 @@ print_stack_urls() {
   fi
 
   echo ""
+  echo "Gateway:               ${base_url}/gateway/health"
   echo "Frontend:              ${frontend_url}"
   echo "Backend:               ${backend_url}"
   echo "Installation config:   ${backend_url}/config/installation"
