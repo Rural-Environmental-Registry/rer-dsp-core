@@ -40,7 +40,7 @@ FIXED_LAYER_IDS = {
 }
 CANONICAL_AOI_DETAIL_FIELDS = (
     "id",
-    "registration_date",
+    "created_at",
     "updated_at",
     "area",
 )
@@ -71,7 +71,7 @@ except ImportError:
 
 
 class AdopterConfigDumper(yaml.SafeDumper):
-    """Write string values in double quotes; keys, numbers, booleans and null unquoted."""
+    """Keys stay unquoted; strings use default YAML quoting (only when needed)."""
 
     def represent_mapping(self, tag, mapping, flow_style=None):
         node = super().represent_mapping(tag, mapping, flow_style)
@@ -84,12 +84,13 @@ class AdopterConfigDumper(yaml.SafeDumper):
         return node
 
 
-def represent_multiline_string(dumper: yaml.SafeDumper, value: str) -> yaml.nodes.ScalarNode:
-    style = ">" if "\n" in value else '"'
-    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+def represent_adopter_string(dumper: yaml.SafeDumper, value: str) -> yaml.nodes.ScalarNode:
+    if "\n" in value:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=">")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value)
 
 
-AdopterConfigDumper.add_representer(str, represent_multiline_string)
+AdopterConfigDumper.add_representer(str, represent_adopter_string)
 
 
 def dump_yaml(data: Any) -> str:
@@ -333,6 +334,18 @@ def ask_field(label: str, default: Any, description: str, used_in: str) -> Any:
     return ask("  Value", default)
 
 
+def ask_optional_field(label: str, default: Any, description: str, used_in: str) -> str | None:
+    print(f"\n  {label}")
+    print(f"  What: {description}")
+    print(f"  Used in: {used_in}")
+    print("  Skip: press Enter if this column is not available.")
+    raw = ask("  Value", default)
+    text = str(raw or "").strip()
+    if not text or text.lower() == "null" or "<" in text:
+        return None
+    return text
+
+
 def ask_int_field(
     label: str,
     default: Any,
@@ -434,54 +447,53 @@ def etl_field_help(field: str) -> str:
         "parent_key": "Source column linking this record to its parent territory.",
         "name_column": "Source column containing the display name.",
         "geometry_column": "Source column containing the geometry.",
-        "created_at_column": "Source column containing the registration date.",
+        "created_at_column": "Source column containing the creation timestamp.",
         "updated_at_column": (
-            "Source column with the last modification timestamp. "
-            "Used as the watermark for incremental sync."
+            "Source column with the last modification timestamp (optional). "
         ),
         "label_column": (
-            "Source column with the feature display name. "
+            "Source column with the feature display name (optional). "
             "Copied to the destination as 'label'."
         ),
         "territory_level_3_column": "Source column linking an area to territorial level 3.",
         "area_column": "Source column containing the area measurement.",
-        "persist_columns": (
+        "additional_columns": (
             "Other source columns to copy besides the required ones. "
             "The destination keeps the same names."
         ),
-        "theme_1_column": (
-            "Source column for theme 1 (dsp-db only). The destination keeps this name — "
-            "use theme_1 as the column or subquery alias to feed the KPI card."
-        ),
-        "theme_2_column": (
-            "Source column for theme 2 (dsp-db only). The destination keeps this name — "
-            "use theme_2 as the column or subquery alias to feed the KPI card."
-        ),
-        "theme_3_column": (
-            "Source column for theme 3 (dsp-db only). The destination keeps this name — "
-            "use theme_3 as the column or subquery alias to feed the KPI card."
-        ),
-        "theme_4_column": (
-            "Source column for theme 4 (dsp-db only). The destination keeps this name — "
-            "use theme_4 as the column or subquery alias to feed the KPI card."
+        "business_only_persist_columns": (
+            "Source columns migrated only to dsp-db for theme KPIs "
+            "(theme_1 … theme_N; use SQL aliases in source_table when names differ)."
         ),
     }
     return descriptions.get(field, "Source value used by the ETL mapping.")
 
 
-def aoi_persist_columns(values: dict[str, Any]) -> list[str]:
-    """Extra destination columns selected for AOI migration."""
+def aoi_additional_columns(values: dict[str, Any]) -> list[str]:
+    """Extra source columns selected for AOI migration (business + geo-target)."""
     aoi = get(values, "etl", "area_of_interest", default={})
-    raw = aoi.get("persist_columns") if isinstance(aoi, dict) else None
-    return parse_column_list(raw, "etl.area_of_interest.persist_columns")
+    if not isinstance(aoi, dict):
+        return []
+    return parse_column_list(aoi.get("additional_columns"), "etl.area_of_interest.additional_columns")
 
 
-def aoi_detail_field_options(persist_columns: list[str]) -> list[str]:
-    """Valid details-panel keys: persist_columns ∪ canonical ∪ calculated.*."""
+def aoi_business_only_persist_columns(values: dict[str, Any], theme_count: int) -> list[str]:
+    aoi = get(values, "etl", "area_of_interest", default={})
+    if not isinstance(aoi, dict):
+        return validate_business_only_persist_columns([], theme_count, "etl.area_of_interest.business_only_persist_columns")
+    return validate_business_only_persist_columns(
+        aoi.get("business_only_persist_columns"),
+        theme_count,
+        "etl.area_of_interest.business_only_persist_columns",
+    )
+
+
+def aoi_detail_field_options(additional_columns: list[str]) -> list[str]:
+    """Valid details-panel keys: additional_columns ∪ canonical ∪ calculated.*."""
     options: list[str] = []
     seen: set[str] = set()
     for name in (
-        list(persist_columns)
+        list(additional_columns)
         + list(CANONICAL_AOI_DETAIL_FIELDS)
         + list(CALCULATED_AOI_DETAIL_FIELDS)
     ):
@@ -494,7 +506,7 @@ def aoi_detail_field_options(persist_columns: list[str]) -> list[str]:
 
 def validate_aoi_detail_fields(
     values: dict[str, Any],
-    persist_columns: list[str],
+    additional_columns: list[str],
 ) -> list[dict[str, str]]:
     """Validate details.fields: AOI migration columns or calculated.* keys."""
     prefix = "installation.screens.detail.fields"
@@ -505,7 +517,7 @@ def validate_aoi_detail_fields(
     if not isinstance(raw, list):
         raise ValueError(f"{prefix} must be a list of field/label mappings.")
 
-    extras = set(persist_columns)
+    extras = set(additional_columns)
     calculated = set(CALCULATED_AOI_DETAIL_FIELDS)
     seen: set[str] = set()
     normalized: list[dict[str, str]] = []
@@ -547,8 +559,8 @@ def validate_aoi_detail_fields(
         if field not in extras:
             raise ValueError(
                 f"{item_prefix}.field '{field}' is not in "
-                "etl.area_of_interest.persist_columns, is not a canonical AOI column "
-                "(id, registration_date, updated_at, area), and is not a calculated "
+                "etl.area_of_interest.additional_columns, is not a canonical AOI column "
+                "(id, created_at, updated_at, area), and is not a calculated "
                 "field (calculated.latitude, calculated.longitude, "
                 "calculated.territory_level_2_name, calculated.territory_level_3_name). "
                 "Select it for AOI migration first, or remove it from details."
@@ -558,12 +570,12 @@ def validate_aoi_detail_fields(
 
 
 def ask_aoi_detail_fields(config: dict[str, Any]) -> None:
-    """Prompt for details-panel fields after persist_columns is chosen."""
-    persist = parse_column_list(
-        config["etl"]["area_of_interest"].get("persist_columns") or [],
-        "etl.area_of_interest.persist_columns",
+    """Prompt for details-panel fields after additional_columns is chosen."""
+    additional = parse_column_list(
+        config["etl"]["area_of_interest"].get("additional_columns") or [],
+        "etl.area_of_interest.additional_columns",
     )
-    options = aoi_detail_field_options(persist)
+    options = aoi_detail_field_options(additional)
     options_set = set(options)
     screens = config.setdefault("installation", {}).setdefault("screens", {})
     detail = screens.setdefault("detail", {})
@@ -592,7 +604,7 @@ def ask_aoi_detail_fields(config: dict[str, Any]) -> None:
         level3 = {}
     canonical_label_defaults = {
         "id": identifier.get("label") or "Identifier",
-        "registration_date": detail.get("registration_date_label") or "Registration date",
+        "created_at": detail.get("registration_date_label") or "Registration date",
         "updated_at": detail.get("alteration_date_label") or "Alteration date",
         "area": detail.get("area_label") or "Area",
         "calculated.latitude": detail.get("latitude_label") or "Latitude",
@@ -633,7 +645,7 @@ def ask_aoi_detail_fields(config: dict[str, Any]) -> None:
             print(
                 f"\n  These fields are not available: {', '.join(unknown)}. "
                 "Choose only from columns selected for AOI migration, "
-                "canonical columns (id, registration_date, updated_at, area), "
+                "canonical columns (id, created_at, updated_at, area), "
                 "and calculated.* keys."
             )
             continue
@@ -713,6 +725,43 @@ def require_non_blank_column(value: Any, prefix: str) -> str:
     return value.strip()
 
 
+def resolve_optional_column(value: Any, prefix: str) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{prefix} must be a string or null.")
+    stripped = value.strip()
+    if not stripped or stripped.lower() == "null":
+        return None
+    if "<" in stripped:
+        raise ValueError(f"{prefix} still contains a placeholder.")
+    return stripped
+
+
+def expected_theme_source_columns(theme_count: int) -> list[str]:
+    return [f"theme_{index}" for index in range(1, theme_count + 1)]
+
+
+def validate_business_only_persist_columns(raw: Any, theme_count: int, prefix: str) -> list[str]:
+    columns = parse_column_list(raw or [], prefix)
+    if theme_count == 0:
+        if columns:
+            raise ValueError(f"{prefix} must be empty when installation.kpis.theme_count is 0.")
+        return []
+    if len(columns) != theme_count:
+        raise ValueError(
+            f"{prefix} must contain exactly {theme_count} column name(s); found {len(columns)}."
+        )
+    expected = set(expected_theme_source_columns(theme_count))
+    if set(columns) != expected:
+        raise ValueError(
+            f"{prefix} must list theme_1 … theme_{theme_count} "
+            "(source column names or SQL aliases in source_table). "
+            f"Found: {', '.join(columns)}."
+        )
+    return expected_theme_source_columns(theme_count)
+
+
 def resolve_optional_layer_field(entry: dict[str, Any], field: str, prefix: str) -> str | None:
     value = entry.get(field)
     if value is None or value == "":
@@ -729,24 +778,6 @@ def require_layer_field(entry: dict[str, Any], field: str, prefix: str) -> str:
     if value is None:
         raise ValueError(f"{prefix}.{field} is required.")
     return value
-
-
-def normalize_adopter_layer_field_aliases(values: dict[str, Any]) -> bool:
-    """Rewrite legacy layer keys onto the current adopter-config names."""
-    changed = False
-    raw_layers = get(values, "etl", "layers", default=[]) or []
-    for entry in raw_layers:
-        if not isinstance(entry, dict):
-            continue
-        if not entry.get("parent_key"):
-            legacy = entry.get("area_of_interest_id_column")
-            if isinstance(legacy, str) and legacy.strip():
-                entry["parent_key"] = legacy.strip()
-                changed = True
-        if "area_of_interest_id_column" in entry and entry.get("parent_key"):
-            entry.pop("area_of_interest_id_column", None)
-            changed = True
-    return changed
 
 
 def reset_disabled_themes(
@@ -771,10 +802,9 @@ def reset_disabled_themes(
             changed = True
 
     aoi = config["etl"]["area_of_interest"]
-    for index in range(1, 5):
-        key = f"theme_{index}_column"
-        if index > theme_count and aoi.get(key) is not None:
-            aoi[key] = None
+    if theme_count == 0:
+        if aoi.get("business_only_persist_columns"):
+            aoi["business_only_persist_columns"] = []
             changed = True
     return changed
 
@@ -1119,16 +1149,15 @@ def normalize_epsg(srid: Any) -> str:
 
 
 def resolve_layer_parent_key(entry: dict[str, Any]) -> str | None:
-    """Return the AOI parent_key for a generic layer (legacy: area_of_interest_id_column)."""
-    for key in ("parent_key", "area_of_interest_id_column"):
-        value = entry.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    """Return the AOI parent_key for a generic layer."""
+    value = entry.get("parent_key")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     return None
 
 
 def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
-    """Validate and normalize etl.layers entries. Returns enabled layers only."""
+    """Validate and normalize etl.layers entries."""
     raw_layers = get(values, "etl", "layers", default=[])
     if raw_layers is None:
         return []
@@ -1137,14 +1166,17 @@ def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
 
     seen_tables: set[str] = set()
     seen_wms: set[str] = set(FIXED_LAYER_IDS)
-    enabled: list[dict[str, Any]] = []
+    validated: list[dict[str, Any]] = []
 
     for index, entry in enumerate(raw_layers):
         prefix = f"etl.layers[{index}]"
         if not isinstance(entry, dict):
             raise ValueError(f"{prefix} must be a mapping.")
-        if entry.get("enabled", True) is False:
-            continue
+        if "enabled" in entry:
+            raise ValueError(
+                f"{prefix}.enabled is not supported. "
+                "Remove the layer from etl.layers when it should not be migrated or shown."
+            )
 
         source_table = entry.get("source_table")
         if not isinstance(source_table, str) or not source_table.strip():
@@ -1199,8 +1231,9 @@ def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
             "source_table": source_table.strip(),
             "area_of_interest_id_column": aoi_column.strip(),
             "primary_key": require_layer_field(entry, "primary_key", prefix),
-            "updated_at_column": require_layer_field(entry, "updated_at_column", prefix),
-            "label_column": require_layer_field(entry, "label_column", prefix),
+            "created_at_column": require_layer_field(entry, "created_at_column", prefix),
+            "updated_at_column": resolve_optional_layer_field(entry, "updated_at_column", prefix),
+            "label_column": resolve_optional_layer_field(entry, "label_column", prefix),
             "geometry_column": require_layer_field(entry, "geometry_column", prefix),
             "layer_name": layer_name,
             "table": table,
@@ -1213,25 +1246,30 @@ def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
             "color": color,
             "fill_color": fill_color,
             "where_clause": str(entry.get("where_clause") or "1=1"),
-            "enabled": True,
         }
-        extras = parse_column_list(entry.get("persist_columns"), f"{prefix}.persist_columns")
+        extras = parse_column_list(
+            entry.get("additional_columns"),
+            f"{prefix}.additional_columns",
+        )
         canonical = {
             normalized["primary_key"],
             aoi_column.strip(),
-            normalized["updated_at_column"],
-            normalized["label_column"],
+            normalized["created_at_column"],
             normalized["geometry_column"],
         }
+        if normalized["updated_at_column"]:
+            canonical.add(normalized["updated_at_column"])
+        if normalized["label_column"]:
+            canonical.add(normalized["label_column"])
         for column in extras:
             if column in canonical:
                 raise ValueError(
-                    f"{prefix}.persist_columns entry '{column}' duplicates a required column mapping."
+                    f"{prefix}.additional_columns entry '{column}' duplicates a required column mapping."
                 )
         if extras:
-            normalized["persist_columns"] = extras
-        enabled.append(normalized)
-    return enabled
+            normalized["additional_columns"] = extras
+        validated.append(normalized)
+    return validated
 
 
 def build_extra_map_layer(entry: dict[str, Any], group_json_key: str) -> dict[str, Any]:
@@ -1395,17 +1433,19 @@ def build_batch_layers(extra_layers: list[dict[str, Any]]) -> list[dict[str, Any
             "source-table": entry["source_table"],
             "primary-key": entry["primary_key"],
             "area-of-interest-id-column": entry["area_of_interest_id_column"],
-            "updated-at-column": entry["updated_at_column"],
-            "label-column": entry["label_column"],
+            "creation-date-column": entry["created_at_column"],
             "geometry-column": entry["geometry_column"],
             "layer-name": entry["layer_name"],
             "srid": entry["srid"],
             "where-clause": entry["where_clause"],
-            "enabled": True,
         }
-        extras = entry.get("persist_columns") or []
+        if entry.get("updated_at_column"):
+            item["updated-at-column"] = entry["updated_at_column"]
+        if entry.get("label_column"):
+            item["label-column"] = entry["label_column"]
+        extras = entry.get("additional_columns") or []
         if extras:
-            item["persist-columns"] = extras
+            item["additional-columns"] = extras
         batch_layers.append(item)
     return batch_layers
 
@@ -1575,9 +1615,21 @@ def ask_generic_layer_entry(
             break
         print("\n  Enter the source column name.")
     entry["parent_key"] = aoi_column
-    entry.pop("area_of_interest_id_column", None)
 
-    for field in ("primary_key", "updated_at_column", "label_column", "geometry_column"):
+    for field in ("primary_key", "created_at_column", "updated_at_column", "label_column", "geometry_column"):
+        if field in ("updated_at_column", "label_column"):
+            while True:
+                value = ask_optional_field(
+                    field,
+                    entry.get(field) or "",
+                    etl_field_help(field),
+                    "the ETL job mapping for this layer",
+                )
+                if value is None or ("<" not in value):
+                    entry[field] = value
+                    break
+                print("\n  Enter the source column name.")
+            continue
         while True:
             value = str(
                 ask_field(
@@ -1592,10 +1644,10 @@ def ask_generic_layer_entry(
                 break
             print("\n  Enter the source column name.")
 
-    entry["persist_columns"] = ask_optional_column_list(
+    entry["additional_columns"] = ask_optional_column_list(
         "Extra columns to migrate",
-        entry.get("persist_columns") or [],
-        etl_field_help("persist_columns"),
+        entry.get("additional_columns") or [],
+        etl_field_help("additional_columns"),
         "the ETL job mapping for this layer",
     )
     entry["where_clause"] = ask_field(
@@ -1676,7 +1728,6 @@ def ask_generic_layer_entry(
         "the map and generated GeoServer style",
         allow_transparent=True,
     )
-    entry["enabled"] = True
     return entry
 
 
@@ -1836,14 +1887,14 @@ def wizard(example: Path, active: Path, *, edit: bool = False, root: Path | None
     config["installation"]["kpis"]["theme_count"] = theme_count
     reset_disabled_themes(config, template, theme_count)
     for name, fields in (
-        ("level1", ("source_table", "primary_key", "name_column", "geometry_column", "updated_at_column")),
+        ("level1", ("source_table", "primary_key", "name_column", "geometry_column", "created_at_column", "updated_at_column")),
         (
             "level2",
-            ("source_table", "primary_key", "parent_key", "name_column", "geometry_column", "updated_at_column"),
+            ("source_table", "primary_key", "parent_key", "name_column", "geometry_column", "created_at_column", "updated_at_column"),
         ),
         (
             "level3",
-            ("source_table", "primary_key", "parent_key", "name_column", "geometry_column", "updated_at_column"),
+            ("source_table", "primary_key", "parent_key", "name_column", "geometry_column", "created_at_column", "updated_at_column"),
         ),
         (
             "area_of_interest",
@@ -1855,32 +1906,52 @@ def wizard(example: Path, active: Path, *, edit: bool = False, root: Path | None
                 "updated_at_column",
                 "territory_level_3_column",
                 "area_column",
-                "theme_1_column",
-                "theme_2_column",
-                "theme_3_column",
-                "theme_4_column",
             ),
         ),
     ):
         print(f"\nEntity: {name}")
         for field in fields:
             section = config["etl"][name]
-            if name == "area_of_interest" and field.startswith("theme_"):
-                if int(field.split("_")[1]) > theme_count:
-                    section[field] = None
-                    continue
+            if field == "updated_at_column":
+                section[field] = ask_optional_field(
+                    field,
+                    section.get(field),
+                    etl_field_help(field),
+                    "the ETL job mapping for this entity",
+                )
+                continue
             section[field] = ask_field(
                 field, section[field],
                 etl_field_help(field),
                 "the ETL job mapping for this entity",
             )
         if name == "area_of_interest":
-            config["etl"][name]["persist_columns"] = ask_optional_column_list(
+            config["etl"][name]["additional_columns"] = ask_optional_column_list(
                 "Extra columns to migrate",
-                config["etl"][name].get("persist_columns") or [],
-                etl_field_help("persist_columns"),
+                config["etl"][name].get("additional_columns") or [],
+                etl_field_help("additional_columns"),
                 "the ETL job mapping for this entity",
             )
+            if theme_count > 0:
+                default_themes = expected_theme_source_columns(theme_count)
+                while True:
+                    selected = ask_optional_column_list(
+                        "Theme KPI columns (business_only_persist_columns)",
+                        config["etl"][name].get("business_only_persist_columns") or default_themes,
+                        etl_field_help("business_only_persist_columns"),
+                        "the ETL job mapping for this entity",
+                    )
+                    try:
+                        config["etl"][name]["business_only_persist_columns"] = validate_business_only_persist_columns(
+                            selected,
+                            theme_count,
+                            "etl.area_of_interest.business_only_persist_columns",
+                        )
+                        break
+                    except ValueError as exc:
+                        print(f"\n  {exc}")
+            else:
+                config["etl"][name]["business_only_persist_columns"] = []
         config["etl"][name]["where_clause"] = ask_field(
             "where-clause", config["etl"][name]["where_clause"],
             "Optional SQL filter applied while reading this entity.",
@@ -2159,7 +2230,10 @@ def replace_env(env_file: Path, values: dict[str, Any]) -> None:
 def set_source_mapping(section: dict[str, Any], values: dict[str, Any]) -> None:
     primary_key = require_non_blank_column(values.get("primary_key"), "primary-key")
     geometry_column = require_non_blank_column(values.get("geometry_column"), "geometry-column")
-    updated_at_column = require_non_blank_column(
+    creation_date_column = require_non_blank_column(
+        values.get("created_at_column"), "created-at-column"
+    )
+    updated_at_column = resolve_optional_column(
         values.get("updated_at_column"), "updated-at-column"
     )
     name_column = values.get("name_column")
@@ -2176,30 +2250,37 @@ def set_source_mapping(section: dict[str, Any], values: dict[str, Any]) -> None:
     section["source-table"] = values["source_table"]
     section["primary-key"] = primary_key
     section["geometry-column"] = geometry_column
-    section["updated-at-column"] = updated_at_column
+    section["creation-date-column"] = creation_date_column
+    if updated_at_column:
+        section["updated-at-column"] = updated_at_column
+    else:
+        section.pop("updated-at-column", None)
     section["where-clause"] = values.get("where_clause") or "1=1"
     if parent_key:
         section["partition-column"] = parent_key
     else:
         section.pop("partition-column", None)
 
-    persist = [primary_key]
+    persist = [primary_key, creation_date_column]
     if name_column:
         persist.append(name_column)
     if parent_key:
         persist.append(parent_key)
-    persist.append(updated_at_column)
+    if updated_at_column:
+        persist.append(updated_at_column)
     section["persist-columns"] = persist
 
     mapping = {
         primary_key: "id",
         geometry_column: "geom",
-        updated_at_column: "updated_at",
+        creation_date_column: "created_at",
     }
     if name_column:
         mapping[name_column] = "name"
     if parent_key:
         mapping[parent_key] = "parent_id"
+    if updated_at_column:
+        mapping[updated_at_column] = "updated_at"
     section["column-mapping"] = mapping
     section.pop("comparison-columns", None)
     section.pop("change-detection-strategy", None)
@@ -2235,21 +2316,17 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         raise ValueError("theme_count must be an integer between 0 and 4.")
     config_changed = reset_disabled_themes(values, template, theme_count)
     config_changed = sync_map_layer_names(values) or config_changed
-    config_changed = normalize_adopter_layer_field_aliases(values) or config_changed
     if config_changed:
         write_adopter_config(active, values, template)
     source_values = []
     for entity in ("level1", "level2", "level3", "area_of_interest"):
         entity_values = get(values, "etl", entity, default={})
-        source_values.extend(
-            value
-            for key, value in entity_values.items()
-            if not (
-                entity == "area_of_interest"
-                and key.startswith("theme_")
-                and int(key.split("_")[1].split("_")[0]) > theme_count
-            )
-        )
+        if not isinstance(entity_values, dict):
+            continue
+        for key, value in entity_values.items():
+            if key in {"additional_columns", "business_only_persist_columns"}:
+                continue
+            source_values.append(value)
     invalid = [
         str(value)
         for value in source_values
@@ -2274,8 +2351,9 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
                 f"map.layers.{layer_name}.fill_color must be 'transparent' or a #RGB/#RRGGBB value."
             )
     extra_layers = validate_extra_layers(values)
-    persist_columns = aoi_persist_columns(values)
-    aoi_detail_fields = validate_aoi_detail_fields(values, persist_columns)
+    additional_columns = aoi_additional_columns(values)
+    business_only_columns = aoi_business_only_persist_columns(values, theme_count)
+    aoi_detail_fields = validate_aoi_detail_fields(values, additional_columns)
     if coerce_map_initial_view_to_planet(values):
         write_adopter_config(active, values, template)
     map_initial_view = validate_map_initial_view(values)
@@ -2402,6 +2480,10 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         set_source_mapping(migration["batch"]["admin-unit"][name.replace("level", "level-")], etl[name])
     aoi = migration["batch"]["area-of-interest"]
     aoi_values = etl["area_of_interest"]
+    updated_at_column = resolve_optional_column(
+        aoi_values.get("updated_at_column"),
+        "etl.area_of_interest.updated_at_column",
+    )
     aoi.update(
         {
             "source-table": aoi_values["source_table"],
@@ -2412,11 +2494,7 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
                 aoi_values.get("created_at_column"),
                 "etl.area_of_interest.created_at_column",
             ),
-            "updated-at-column": require_non_blank_column(
-                aoi_values.get("updated_at_column"),
-                "etl.area_of_interest.updated_at_column",
-            ),
-            "commune-id-column": require_non_blank_column(
+            "territory-level-3-column": require_non_blank_column(
                 aoi_values.get("territory_level_3_column"),
                 "etl.area_of_interest.territory_level_3_column",
             ),
@@ -2430,46 +2508,36 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
             "where-clause": aoi_values.get("where_clause") or "1=1",
         }
     )
-    extras = persist_columns
+    if updated_at_column:
+        aoi["updated-at-column"] = updated_at_column
+    else:
+        aoi.pop("updated-at-column", None)
     canonical_source = {
         aoi["primary-key"],
         aoi["creation-date-column"],
-        aoi["updated-at-column"],
-        aoi["commune-id-column"],
+        aoi["territory-level-3-column"],
         aoi["total-area-column"],
         aoi["geometry-column"],
     }
-    for column in extras:
+    if updated_at_column:
+        canonical_source.add(updated_at_column)
+    for column in additional_columns:
         if column in canonical_source:
             raise ValueError(
-                "etl.area_of_interest.persist_columns entry "
+                "etl.area_of_interest.additional_columns entry "
                 f"'{column}' duplicates a required column mapping."
             )
-    aoi["persist-columns"] = extras
+    aoi["additional-columns"] = additional_columns
     aoi.pop("comparison-columns", None)
     aoi.pop("column-mapping", None)
     aoi.pop("change-detection-strategy", None)
-    aoi["business-only-persist-columns"] = []
-    for index in range(1, 5):
-        if index > theme_count:
-            continue
-        source = aoi_values.get(f"theme_{index}_column")
-        if not isinstance(source, str) or not source.strip() or source.strip().lower() == "null":
+    aoi["business-only-persist-columns"] = business_only_columns
+    for column in business_only_columns:
+        if column in canonical_source or column in additional_columns:
             raise ValueError(
-                f"etl.area_of_interest.theme_{index}_column is required when "
-                f"installation.kpis.theme_count is {theme_count}. "
-                "Set the source column, or lower theme_count to 0 if you have no theme KPIs."
+                f"etl.area_of_interest.business_only_persist_columns entry '{column}' duplicates "
+                "a required or additional column mapping."
             )
-        source = source.strip()
-        if source in canonical_source or source in extras:
-            raise ValueError(
-                f"etl.area_of_interest.theme_{index}_column '{source}' duplicates "
-            )
-        if source in aoi["business-only-persist-columns"]:
-            raise ValueError(
-                f"etl.area_of_interest.theme_{index}_column '{source}' is duplicated."
-            )
-        aoi["business-only-persist-columns"].append(source)
     migration["batch"]["layers"] = build_batch_layers(extra_layers)
     jobs = etl.get("jobs", {})
     job_names = {
