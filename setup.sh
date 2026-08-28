@@ -30,11 +30,14 @@ prompt_setup_data_mode
 
 WILL_MIGRATE="${WILL_MIGRATE:-false}"
 INCLUDE_MIGRATION_DB="${INCLUDE_MIGRATION_DB:-false}"
+KEEP_MIGRATION_SERVICE="${KEEP_MIGRATION_SERVICE:-false}"
 
 if [ "$SETUP_MODE" = "demo" ]; then
   info "Mode: demonstration (built-in seed)"
 elif [ "$WILL_MIGRATE" = "true" ]; then
   info "Mode: real adopter setup with ETL migration (${MIGRATION_EXECUTION_MODE:-once})"
+elif [ "$KEEP_MIGRATION_SERVICE" = "true" ]; then
+  info "Mode: real adopter setup — first load scheduled (${MIGRATION_EXECUTION_MODE})"
 else
   info "Mode: real adopter setup without migration"
 fi
@@ -83,7 +86,7 @@ ensure_adopter_config
 
 step_header 5 "Migration job repository path"
 
-if [ "$WILL_MIGRATE" = "true" ]; then
+if [ "$INCLUDE_MIGRATION_DB" = "true" ]; then
   ensure_dsp_repositories --job
 else
   info "Migration skipped — job repository check not required."
@@ -123,10 +126,10 @@ print_migration_preview "$MIGRATION_CONFIG" "$WILL_MIGRATE"
 
 step_header 8 "Confirmation"
 
-if [ "$WILL_MIGRATE" = "true" ] && [ "$MIGRATION_CONFIG_READY" = "false" ]; then
-  error "Migration will run, but application.yaml is still a copy of the template."
+if { [ "$WILL_MIGRATE" = "true" ] || [ "$KEEP_MIGRATION_SERVICE" = "true" ]; } && [ "$MIGRATION_CONFIG_READY" = "false" ]; then
+  error "Migration will run (now or on the schedule), but application.yaml is still a copy of the template."
   error "Edit $MIGRATION_CONFIG (or run ./config.sh) and run './setup.sh' again."
-  error "Or choose option 3 (real without migration) or option 1 (demonstration)."
+  error "Or choose option 1 (demonstration)."
   exit 1
 fi
 
@@ -143,14 +146,18 @@ if [ "$WILL_MIGRATE" = "true" ]; then
   info "Running initial data migration (profile=migration)..."
   run_migration_job_once
   ok "Initial migration finished"
-  set_env_var "DSP_MIGRATION_EXECUTION_MODE" "${MIGRATION_EXECUTION_MODE:-once}"
-  if [ "${MIGRATION_EXECUTION_MODE:-once}" = "continuous" ]; then
-    set_env_var "DSP_MIGRATION_SYNC_INTERVAL" "${MIGRATION_SYNC_INTERVAL:-1h}"
+  persist_migration_env
+  if [ "$KEEP_MIGRATION_SERVICE" = "true" ]; then
     start_migration_service_stack
-    ok "Migration service stack is running (periodic sync every ${MIGRATION_SYNC_INTERVAL:-1h})"
+    ok "Migration service stack is running (${MIGRATION_EXECUTION_MODE}${MIGRATION_CRON:+ cron=${MIGRATION_CRON}})"
   fi
+elif [ "$KEEP_MIGRATION_SERVICE" = "true" ]; then
+  persist_migration_env
+  info "First load is scheduled — not running the job during this setup."
+  start_migration_service_stack
+  ok "Migration service stack is running (${MIGRATION_EXECUTION_MODE}${MIGRATION_CRON:+ cron=${MIGRATION_CRON}}${MIGRATION_SCHEDULED_AT:+ at=${MIGRATION_SCHEDULED_AT}})"
 else
-  info "Data migration skipped (option 3 — real adopter without ETL)."
+  persist_migration_env
 fi
 
 step_header 10 "GeoServers (publish layers)"
@@ -158,13 +165,17 @@ step_header 10 "GeoServers (publish layers)"
 start_geoserver_exhibition "populate" "$MIGRATION_CONFIG"
 start_geoserver_download "populate"
 
-ok "Setup finished — data is ready on Docker volumes."
+if [ "$KEEP_MIGRATION_SERVICE" = "true" ] && [ "$WILL_MIGRATE" != "true" ]; then
+  ok "Setup finished — databases stay empty until the scheduled first load."
+else
+  ok "Setup finished — data is ready on Docker volumes."
+fi
 echo ""
 echo "Next: start the application stacks with:"
 echo "  ./start.sh"
 echo ""
 echo "Day-to-day: prefer ./start.sh (does not re-run migration)."
-if [ "${MIGRATION_EXECUTION_MODE:-once}" = "continuous" ]; then
+if [ "$KEEP_MIGRATION_SERVICE" = "true" ]; then
   print_migration_resync_hints
 fi
 echo "Rebuild only frontend: docker compose up -d --build dsp-frontend"

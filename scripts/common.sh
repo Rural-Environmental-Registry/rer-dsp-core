@@ -23,6 +23,10 @@ ok() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=migration_schedule.sh
+source "$_COMMON_DIR/migration_schedule.sh"
+
 # Base pública da stack (gateway). DSP_PUBLIC_BASE_URL tem precedência; sem ela,
 # monta a URL a partir do host e da porta do gateway, omitindo a porta 80.
 dsp_public_base_url() {
@@ -611,7 +615,9 @@ print_migration_preview() {
   local will_run="${2:-false}"
   local run_label="disabled"
   if [ "$will_run" = "true" ]; then
-    run_label="enabled"
+    run_label="enabled (runs during this setup)"
+  elif [ "${KEEP_MIGRATION_SERVICE:-false}" = "true" ]; then
+    run_label="scheduled (${MIGRATION_EXECUTION_MODE:-unknown})"
   fi
 
   local batch_url source_url target_url
@@ -646,7 +652,13 @@ print_migration_preview() {
   j_layers="$(yaml_scalar "$cfg" "execution-jobs" "layer-jobs")"
 
   info "Migration configuration preview:"
-  echo "  Job execution: ${run_label} (will run via ./setup.sh)"
+  echo "  Job execution: ${run_label}"
+  if [ -n "${MIGRATION_CRON:-}" ]; then
+    echo "  Cron: ${MIGRATION_CRON} (tz=${MIGRATION_TZ:-UTC})"
+  fi
+  if [ -n "${MIGRATION_SCHEDULED_AT:-}" ]; then
+    echo "  Scheduled at: ${MIGRATION_SCHEDULED_AT} (tz=${MIGRATION_TZ:-UTC})"
+  fi
   echo "  Datasources:"
   echo "    batch:  ${batch_url:-<missing>} (user: ${batch_user:-<missing>})"
   echo "    source: ${source_url:-<missing>} (user: ${source_user:-<missing>})"
@@ -1002,6 +1014,9 @@ reject_legacy_migration_env() {
     error "DSP_SKIP_MIGRATION is no longer supported. Remove it from .env and choose option 3 in ./setup.sh if you do not want to migrate."
     exit 1
   fi
+  if [ -n "${DSP_MIGRATION_SYNC_INTERVAL:-}" ]; then
+    warn "DSP_MIGRATION_SYNC_INTERVAL is ignored. Schedule is DSP_MIGRATION_CRON (set by ./setup.sh)."
+  fi
 }
 
 ensure_dotenv() {
@@ -1054,10 +1069,19 @@ set_env_var() {
     exit 1
   fi
 
+  local quoted
+  quoted="$(dsp_quote_dotenv_value "$value")"
+
   if grep -q "^${key}=" "$env_file"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$env_file"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v k="$key" -v v="$quoted" '
+      $0 ~ "^" k "=" { print k "=" v; next }
+      { print }
+    ' "$env_file" >"$tmp"
+    mv "$tmp" "$env_file"
   else
-    printf '\n%s=%s\n' "$key" "$value" >>"$env_file"
+    printf '\n%s=%s\n' "$key" "$quoted" >>"$env_file"
   fi
 
   set -a
@@ -1074,6 +1098,28 @@ is_continuous_migration_mode() {
   [ "$(get_migration_execution_mode)" = "continuous" ]
 }
 
+is_scheduled_once_migration_mode() {
+  [ "$(get_migration_execution_mode)" = "scheduled-once" ]
+}
+
+is_persistent_migration_mode() {
+  is_continuous_migration_mode || is_scheduled_once_migration_mode
+}
+
+migration_scheduled_once_completed() {
+  local state code
+  state="$(docker inspect -f '{{.State.Status}}' dsp-job-migration 2>/dev/null)" || return 1
+  code="$(docker inspect -f '{{.State.ExitCode}}' dsp-job-migration 2>/dev/null)" || return 1
+  [ "$state" = "exited" ] && [ "$code" = "0" ]
+}
+
+persist_migration_env() {
+  set_env_var "DSP_MIGRATION_EXECUTION_MODE" "${MIGRATION_EXECUTION_MODE:-once}"
+  set_env_var "DSP_MIGRATION_TZ" "${MIGRATION_TZ:-${TZ:-UTC}}"
+  set_env_var "DSP_MIGRATION_CRON" "${MIGRATION_CRON:-}"
+  set_env_var "DSP_MIGRATION_SCHEDULED_AT" "${MIGRATION_SCHEDULED_AT:-}"
+}
+
 run_migration_job_once() {
   docker compose --env-file .env --profile migration run --rm --build \
     -e DSP_MIGRATION_EXECUTION_MODE=once \
@@ -1083,7 +1129,11 @@ run_migration_job_once() {
 start_migration_service_stack() {
   info "Starting migration service stack (profile=migration)..."
   docker compose --env-file .env --profile migration up -d dsp-job-migration-db dsp-job-migration
-  docker update --restart unless-stopped dsp-job-migration >/dev/null 2>&1 || true
+  if is_continuous_migration_mode; then
+    docker update --restart unless-stopped dsp-job-migration >/dev/null 2>&1 || true
+  else
+    docker update --restart no dsp-job-migration >/dev/null 2>&1 || true
+  fi
 
   info "Waiting for dsp-job-migration-db..."
   if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
@@ -1093,21 +1143,28 @@ start_migration_service_stack() {
   ok "Migration service stack ready"
 }
 
-ensure_migration_service_if_continuous() {
-  if ! is_continuous_migration_mode; then
+ensure_migration_service_if_needed() {
+  if is_scheduled_once_migration_mode && migration_scheduled_once_completed; then
+    info "Scheduled one-shot migration already finished — not restarting the job container."
+    return 0
+  fi
+  if ! is_persistent_migration_mode; then
     return 0
   fi
   start_migration_service_stack
 }
 
 print_migration_resync_hints() {
-  if ! is_continuous_migration_mode; then
+  if ! is_persistent_migration_mode; then
     return 0
   fi
-  local interval="${DSP_MIGRATION_SYNC_INTERVAL:-1h}"
+  local mode cron tz
+  mode="$(get_migration_execution_mode)"
+  cron="${DSP_MIGRATION_CRON:-}"
+  tz="${DSP_MIGRATION_TZ:-UTC}"
   echo ""
-  echo "Migration execution mode: continuous (automatic re-sync every ${interval})"
-  echo "Optional one-shot re-sync (in addition to the scheduled loop):"
+  echo "Migration execution mode: ${mode} (tz=${tz}${cron:+ cron=${cron}})"
+  echo "Optional one-shot re-sync (in addition to the schedule):"
   echo "  docker compose --env-file .env --profile migration run --rm -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration"
 }
 
@@ -1400,6 +1457,7 @@ prompt_setup_data_mode() {
       SETUP_MODE="demo"
       WILL_MIGRATE=false
       INCLUDE_MIGRATION_DB=false
+      KEEP_MIGRATION_SERVICE=false
       ;;
     2)
       SETUP_MODE="real"
@@ -1410,7 +1468,8 @@ prompt_setup_data_mode() {
     3)
       SETUP_MODE="real"
       WILL_MIGRATE=false
-      INCLUDE_MIGRATION_DB=false
+      INCLUDE_MIGRATION_DB=true
+      prompt_deferred_migration_plan
       ;;
     4)
       show_stack_status_menu
@@ -1423,57 +1482,158 @@ prompt_setup_data_mode() {
   esac
 }
 
-# Returns 0 if $1 is a valid sync interval (Nm or Nh, at least 5 minutes).
-is_valid_migration_sync_interval() {
-  local raw="$1"
-  local num unit seconds
-
-  if [[ ! "$raw" =~ ^[0-9]+[mh]$ ]]; then
-    return 1
-  fi
-
-  num="${raw%[mh]}"
-  unit="${raw#"${num}"}"
-
-  if [ -z "$num" ] || [ "$num" -eq 0 ]; then
-    return 1
-  fi
-
-  case "$unit" in
-    m) seconds=$((num * 60)) ;;
-    h) seconds=$((num * 3600)) ;;
-    *) return 1 ;;
-  esac
-
-  [ "$seconds" -ge 300 ]
-}
-
-# Sets global MIGRATION_SYNC_INTERVAL after continuous mode is chosen.
-prompt_migration_sync_interval() {
-  echo ""
-  echo "How often should the continuous migration re-sync from the source?"
-  echo "  Format: minutes (e.g. 30m) or hours (e.g. 1h, 6h)."
-  echo "  Minimum: 5m. Default: 1h."
-  echo ""
-
-  local raw=""
+prompt_migration_hhmm() {
+  local prompt_label="${1:-Time}"
+  local default_hhmm="${2:-22:00}"
+  local raw normalized
   while true; do
-    read -r -p "Sync interval [1h]: " raw || true
+    read -r -p "${prompt_label} [${default_hhmm}]: " raw || true
     if [ -z "$raw" ]; then
-      raw="1h"
+      raw="$default_hhmm"
     fi
-    if is_valid_migration_sync_interval "$raw"; then
-      MIGRATION_SYNC_INTERVAL="$raw"
-      ok "Continuous sync interval: ${MIGRATION_SYNC_INTERVAL}"
+    if normalized="$(dsp_normalize_hhmm "$raw")"; then
+      MIGRATION_HHMM="$normalized"
       return 0
     fi
-    error "Invalid interval: '${raw}' — use Nm or Nh (e.g. 30m, 1h), minimum 5m."
+    error "Invalid time: '${raw}' — use HH:MM (e.g. 22:00)."
   done
 }
 
+# Sets MIGRATION_CRON. Time is asked only for "every day" when no clock was already chosen (option 2).
+# $1 optional HH:MM from option 3 When — reused for daily cron, not asked again.
+prompt_migration_how_often() {
+  local hhmm="${1:-}"
+  local freq_choice step
+  echo ""
+  echo "How often should synchronization run?"
+  echo ""
+  if [ -n "$hhmm" ]; then
+    echo "  1) Every day at that time (${hhmm})"
+  else
+    echo "  1) Every day at a given time"
+  fi
+  echo "  2) Every N hours"
+  echo "     N must divide 24 (1, 2, 3, 4, 6, 8, 12 or 24)."
+  echo "  3) Every N minutes"
+  echo "     N is 1–59 (useful for local testing)."
+  echo ""
+  while true; do
+    read -r -p "Choice [1]: " freq_choice || true
+    case "${freq_choice:-1}" in
+      1|2|3)
+        break
+        ;;
+      *)
+        error "Invalid choice: '${freq_choice}' — use 1 (every day), 2 (every N hours) or 3 (every N minutes)."
+        ;;
+    esac
+  done
+  case "${freq_choice:-1}" in
+    1)
+      if [ -z "$hhmm" ]; then
+        prompt_migration_hhmm "Time" "22:00"
+        hhmm="$MIGRATION_HHMM"
+      fi
+      MIGRATION_CRON="$(dsp_build_daily_cron "$hhmm")"
+      ;;
+    2)
+      while true; do
+        read -r -p "Every how many hours? [6]: " step || true
+        if [ -z "$step" ]; then
+          step="6"
+        fi
+        if MIGRATION_CRON="$(dsp_build_hourly_cron "$step")"; then
+          break
+        fi
+        error "Invalid interval: '${step}' — use 1, 2, 3, 4, 6, 8, 12 or 24."
+      done
+      ;;
+    3)
+      while true; do
+        read -r -p "Every how many minutes? [5]: " step || true
+        if [ -z "$step" ]; then
+          step="5"
+        fi
+        if MIGRATION_CRON="$(dsp_build_minute_cron "$step")"; then
+          break
+        fi
+        error "Invalid interval: '${step}' — use an integer from 1 to 59."
+      done
+      ;;
+  esac
+  ok "Schedule cron: ${MIGRATION_CRON}"
+}
+
+# Option 3 + once or continuous. Sets MIGRATION_SCHEDULED_AT and MIGRATION_HHMM.
+prompt_migration_when() {
+  local date_ymd today
+  MIGRATION_TZ="${TZ:-UTC}"
+  echo ""
+  echo "When should the migration start?"
+  today="$(TZ="${MIGRATION_TZ}" date +%F)"
+  while true; do
+    read -r -p "Date (YYYY-MM-DD) [${today}]: " date_ymd || true
+    if [ -z "$date_ymd" ]; then
+      date_ymd="$today"
+    fi
+    if ! dsp_valid_iso_date "$date_ymd"; then
+      error "Invalid date: '${date_ymd}' — use YYYY-MM-DD."
+      continue
+    fi
+    prompt_migration_hhmm "Time" "22:00"
+    if dsp_datetime_is_future "$date_ymd" "$MIGRATION_HHMM" "$MIGRATION_TZ"; then
+      MIGRATION_SCHEDULED_AT="${date_ymd} ${MIGRATION_HHMM}:00"
+      ok "Scheduled for ${MIGRATION_SCHEDULED_AT} (${MIGRATION_TZ})"
+      return 0
+    fi
+    error "That date/time is in the past. Choose a future time."
+  done
+}
+
+# Option 3: same 1/2 choices, wording does not claim the job runs during this setup.
+prompt_deferred_migration_plan() {
+  KEEP_MIGRATION_SERVICE=true
+  MIGRATION_CRON=""
+  MIGRATION_SCHEDULED_AT=""
+  MIGRATION_TZ="${TZ:-UTC}"
+  echo ""
+  echo "How should the migration job run after setup?"
+  echo ""
+  echo "  1) One-time migration"
+  echo "     Does not run during this setup. Runs once at the time you choose next,"
+  echo "     then stops and removes the migration job Docker container."
+  echo ""
+  echo "  2) Continuous service (periodic re-sync)"
+  echo "     Does not run during this setup. Starts at the time you choose, then keeps"
+  echo "     the job container running and re-syncs from the source on a schedule you choose."
+  echo ""
+  local choice=""
+  read -r -p "Choice [1/2]: " choice || true
+  case "$choice" in
+    1|"")
+      MIGRATION_EXECUTION_MODE="scheduled-once"
+      prompt_migration_when
+      ;;
+    2)
+      MIGRATION_EXECUTION_MODE="continuous"
+      prompt_migration_when
+      prompt_migration_how_often "$MIGRATION_HHMM"
+      ;;
+    *)
+      error "Invalid choice: '${choice}' — use 1 (one-time) or 2 (continuous service)."
+      error "Run './${DSP_ORCHESTRATION_SCRIPT}' again."
+      exit 1
+      ;;
+  esac
+}
+
 # Sets global MIGRATION_EXECUTION_MODE (once|continuous) after option 2 in ./setup.sh.
-# When continuous, also sets MIGRATION_SYNC_INTERVAL via prompt_migration_sync_interval.
+# When continuous, also sets MIGRATION_CRON via prompt_migration_how_often.
 prompt_migration_execution_mode() {
+  KEEP_MIGRATION_SERVICE=false
+  MIGRATION_CRON=""
+  MIGRATION_SCHEDULED_AT=""
+  MIGRATION_TZ="${TZ:-UTC}"
   echo ""
   echo "How should the migration job run after setup?"
   echo ""
@@ -1489,11 +1649,11 @@ prompt_migration_execution_mode() {
   case "$choice" in
     1|"")
       MIGRATION_EXECUTION_MODE="once"
-      MIGRATION_SYNC_INTERVAL=""
       ;;
     2)
       MIGRATION_EXECUTION_MODE="continuous"
-      prompt_migration_sync_interval
+      KEEP_MIGRATION_SERVICE=true
+      prompt_migration_how_often
       ;;
     *)
       error "Invalid choice: '${choice}' — use 1 (one-time) or 2 (continuous service)."
@@ -1820,9 +1980,9 @@ print_stack_urls() {
       svc_status="$(stack_service_status dsp-job-migration-db)"
       print_stack_url_line "Job migration DB" "$svc_status" "$migration_db_url"
     fi
-    if is_continuous_migration_mode && is_stack_service_up dsp-job-migration; then
+    if is_persistent_migration_mode && is_stack_service_up dsp-job-migration; then
       svc_status="$(stack_service_status dsp-job-migration)"
-      print_stack_url_line "Migration job (service)" "$svc_status" "mode=continuous (re-sync every ${DSP_MIGRATION_SYNC_INTERVAL:-1h})"
+      print_stack_url_line "Migration job (service)" "$svc_status" "mode=$(get_migration_execution_mode)${DSP_MIGRATION_CRON:+ cron=${DSP_MIGRATION_CRON}}${DSP_MIGRATION_SCHEDULED_AT:+ at=${DSP_MIGRATION_SCHEDULED_AT}}"
     fi
     return
   fi
@@ -1842,8 +2002,8 @@ print_stack_urls() {
   if is_stack_service_up dsp-job-migration-db; then
     echo "Job migration DB:      ${migration_db_url}"
   fi
-  if is_continuous_migration_mode && is_stack_service_up dsp-job-migration; then
-    echo "Migration job:         continuous service (re-sync every ${DSP_MIGRATION_SYNC_INTERVAL:-1h})"
+  if is_persistent_migration_mode && is_stack_service_up dsp-job-migration; then
+    echo "Migration job:         $(get_migration_execution_mode)${DSP_MIGRATION_CRON:+ cron=${DSP_MIGRATION_CRON}}${DSP_MIGRATION_SCHEDULED_AT:+ at=${DSP_MIGRATION_SCHEDULED_AT}}"
   fi
 }
 

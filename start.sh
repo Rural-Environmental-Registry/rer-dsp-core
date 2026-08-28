@@ -49,9 +49,14 @@ fi
 
 step_header 6 "Confirmation"
 
-if is_continuous_migration_mode; then
-  info "Continuous migration mode — ./start.sh will keep the migration stack running."
-  info "The job container re-syncs automatically every ${DSP_MIGRATION_SYNC_INTERVAL:-1h}."
+if is_persistent_migration_mode; then
+  info "Scheduled migration is enabled — ./start.sh will keep the migration stack running when needed."
+  if [ -n "${DSP_MIGRATION_CRON:-}" ]; then
+    info "Cron: ${DSP_MIGRATION_CRON} (tz=${DSP_MIGRATION_TZ:-UTC})"
+  fi
+  if [ -n "${DSP_MIGRATION_SCHEDULED_AT:-}" ]; then
+    info "First load at: ${DSP_MIGRATION_SCHEDULED_AT} (tz=${DSP_MIGRATION_TZ:-UTC})"
+  fi
 else
   info "This script starts the application stack only (no data migration)."
 fi
@@ -65,9 +70,9 @@ fi
 step_header 7 "Databases"
 
 start_databases_and_wait "false"
-ensure_migration_service_if_continuous
-if is_continuous_migration_mode; then
-  info "Migration service stack is active (continuous mode)."
+ensure_migration_service_if_needed
+if is_persistent_migration_mode; then
+  info "Migration service stack is active ($(get_migration_execution_mode))."
 else
   info "Migration is not run by ./start.sh. Use ./setup.sh when you need to (re)migrate."
 fi

@@ -1,85 +1,133 @@
 #!/bin/sh
-# Migration job entrypoint — mode is controlled by DSP_MIGRATION_EXECUTION_MODE.
-#   once       — run Spring Batch and exit (used by compose run --rm)
-#   continuous — re-run Spring Batch on DSP_MIGRATION_SYNC_INTERVAL (default 1h)
+# Migration job entrypoint — DSP_MIGRATION_EXECUTION_MODE:
+#   once            — java -jar and exit (compose run --rm / setup option 2)
+#   continuous      — optional wait until DSP_MIGRATION_SCHEDULED_AT (option 3),
+#                     one first load, then supercronic on DSP_MIGRATION_CRON
+#   scheduled-once  — wait until DSP_MIGRATION_SCHEDULED_AT, run once, exit
 set -e
 
 MODE="${DSP_MIGRATION_EXECUTION_MODE:-once}"
+JAVA_BIN="java ${JAVA_OPTS:--XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0} -jar /app/app.jar"
 
-if [ "$MODE" != "continuous" ]; then
-  exec java ${JAVA_OPTS:--XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0} -jar /app/app.jar
+if [ -n "${DSP_MIGRATION_TZ:-}" ]; then
+  TZ="$DSP_MIGRATION_TZ"
+  export TZ
 fi
+TZ="${TZ:-UTC}"
+export TZ
 
-# --- continuous: periodic re-sync -------------------------------------------
-
-LOCK_FILE="/tmp/dsp-migration-sync.lock"
-
-interval_to_seconds() {
-  raw="$1"
-  if ! printf '%s' "$raw" | grep -Eq '^[0-9]+[mh]$'; then
-    return 1
-  fi
-  num=$(printf '%s' "$raw" | sed 's/[mh]$//')
-  unit=$(printf '%s' "$raw" | sed 's/^[0-9]*//')
-  if [ -z "$num" ] || [ "$num" -eq 0 ]; then
-    return 1
-  fi
-  case "$unit" in
-    m) seconds=$((num * 60)) ;;
-    h) seconds=$((num * 3600)) ;;
-    *) return 1 ;;
-  esac
-  if [ "$seconds" -lt 300 ]; then
-    return 1
-  fi
-  printf '%s\n' "$seconds"
+valid_cron_5() {
+  # shellcheck disable=SC2086
+  set -- $1
+  [ "$#" -eq 5 ]
 }
 
-acquire_sync_lock() {
-  if [ -f "$LOCK_FILE" ]; then
-    old_pid=$(cat "$LOCK_FILE" 2>/dev/null || true)
-    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-      return 1
-    fi
-    rm -f "$LOCK_FILE"
-  fi
-  printf '%s\n' "$$" >"$LOCK_FILE"
-  return 0
-}
-
-release_sync_lock() {
-  rm -f "$LOCK_FILE"
-}
-
-INTERVAL_RAW="${DSP_MIGRATION_SYNC_INTERVAL:-1h}"
-INTERVAL_SECONDS=$(interval_to_seconds "$INTERVAL_RAW") || {
-  echo "[entrypoint] Invalid or too-small DSP_MIGRATION_SYNC_INTERVAL='${INTERVAL_RAW}' — using 1h" >&2
-  INTERVAL_RAW="1h"
-  INTERVAL_SECONDS=3600
-}
-
-echo "[entrypoint] Continuous mode: re-sync every ${INTERVAL_RAW} (${INTERVAL_SECONDS}s)"
-echo "[entrypoint] Initial load already ran in setup; waiting one interval before first cycle."
-
-while true; do
-  echo "[entrypoint] Sleeping ${INTERVAL_SECONDS}s until next sync cycle..."
-  sleep "$INTERVAL_SECONDS"
-
-  if ! acquire_sync_lock; then
-    echo "[entrypoint] Sync cycle skipped — another sync is still running (lock ${LOCK_FILE})" >&2
-    continue
-  fi
-
-  echo "[entrypoint] Starting sync cycle..."
+run_jar() {
+  echo "[entrypoint] Starting migration cycle (tz=${TZ})..."
   set +e
-  java ${JAVA_OPTS:--XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0} -jar /app/app.jar
+  # shellcheck disable=SC2086
+  $JAVA_BIN
   status=$?
   set -e
-  release_sync_lock
-
   if [ "$status" -eq 0 ]; then
-    echo "[entrypoint] Sync cycle finished successfully"
+    echo "[entrypoint] Migration cycle finished successfully"
   else
-    echo "[entrypoint] Sync cycle failed (exit ${status}) — will retry after next interval" >&2
+    echo "[entrypoint] Migration cycle failed (exit ${status})" >&2
   fi
-done
+  return "$status"
+}
+
+# Empty DSP_MIGRATION_SCHEDULED_AT: no wait (option 2 continuous).
+wait_until_scheduled() {
+  WHEN="${DSP_MIGRATION_SCHEDULED_AT:-}"
+  if [ -z "$WHEN" ]; then
+    return 0
+  fi
+  target=$(date -d "$WHEN" +%s) || {
+    echo "[entrypoint] Invalid DSP_MIGRATION_SCHEDULED_AT: '${WHEN}'" >&2
+    exit 1
+  }
+  now=$(date +%s)
+  if [ "$target" -gt "$now" ]; then
+    wait_s=$((target - now))
+    echo "[entrypoint] waiting until ${WHEN} (${wait_s}s, tz=${TZ})"
+    sleep "$wait_s"
+  else
+    echo "[entrypoint] ${WHEN} is in the past — continuing"
+  fi
+}
+
+run_deferred_first_load() {
+  marker="/tmp/dsp-migration-deferred-initial.done"
+  if [ -z "${DSP_MIGRATION_SCHEDULED_AT:-}" ]; then
+    return 0
+  fi
+  if [ -f "$marker" ]; then
+    echo "[entrypoint] deferred first load already done — skipping"
+    return 0
+  fi
+  wait_until_scheduled
+  run_jar || true
+  touch "$marker"
+}
+
+case "$MODE" in
+  once|"")
+    # shellcheck disable=SC2086
+    exec $JAVA_BIN
+    ;;
+
+  scheduled-once)
+    if [ -z "${DSP_MIGRATION_SCHEDULED_AT:-}" ]; then
+      echo "[entrypoint] DSP_MIGRATION_SCHEDULED_AT is required for scheduled-once" >&2
+      exit 1
+    fi
+    wait_until_scheduled
+    run_jar
+    exit $?
+    ;;
+
+  continuous)
+    CRON="${DSP_MIGRATION_CRON:-0 22 * * *}"
+    if ! valid_cron_5 "$CRON"; then
+      echo "[entrypoint] Invalid DSP_MIGRATION_CRON (need 5 fields): '${CRON}'" >&2
+      exit 1
+    fi
+    if ! command -v supercronic >/dev/null 2>&1; then
+      echo "[entrypoint] supercronic not found in the image — rebuild dsp-job-migration" >&2
+      exit 1
+    fi
+    run_deferred_first_load
+    WRAPPER="/tmp/dsp-migration-run.sh"
+    cat >"$WRAPPER" <<'EOF'
+#!/bin/sh
+JAVA_BIN="java ${JAVA_OPTS:--XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0} -jar /app/app.jar"
+lock="/tmp/dsp-migration-sync.lock"
+exec 9>"$lock"
+if ! flock -n 9; then
+  echo "[entrypoint] Sync cycle skipped — another sync is still running" >&2
+  exit 0
+fi
+echo "[entrypoint] Starting migration cycle..."
+set +e
+$JAVA_BIN
+status=$?
+set -e
+if [ "$status" -eq 0 ]; then
+  echo "[entrypoint] Migration cycle finished successfully"
+  exit 0
+fi
+echo "[entrypoint] Migration cycle failed (exit ${status})" >&2
+exit 0
+EOF
+    chmod +x "$WRAPPER"
+    echo "[entrypoint] continuous: supercronic cron='${CRON}' tz=${TZ}"
+    echo "${CRON} ${WRAPPER}" > /tmp/dsp-migration.crontab
+    exec supercronic /tmp/dsp-migration.crontab
+    ;;
+
+  *)
+    echo "[entrypoint] Invalid DSP_MIGRATION_EXECUTION_MODE: '${MODE}' (once|continuous|scheduled-once)" >&2
+    exit 1
+    ;;
+esac
