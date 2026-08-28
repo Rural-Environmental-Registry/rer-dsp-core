@@ -162,8 +162,14 @@ fi
 
 step_header 10 "GeoServers (publish layers)"
 
-start_geoserver_exhibition "populate" "$MIGRATION_CONFIG"
-start_geoserver_download "populate"
+if [ "$KEEP_MIGRATION_SERVICE" = "true" ] && [ "$WILL_MIGRATE" != "true" ]; then
+  info "Option 3 — starting GeoServers now; layers are published after the first scheduled migration."
+  start_geoserver_exhibition "start" "$MIGRATION_CONFIG"
+  start_geoserver_download "start"
+else
+  start_geoserver_exhibition "populate" "$MIGRATION_CONFIG"
+  start_geoserver_download "populate"
+fi
 
 if [ "$KEEP_MIGRATION_SERVICE" = "true" ] && [ "$WILL_MIGRATE" != "true" ]; then
   ok "Setup finished — databases stay empty until the scheduled first load."

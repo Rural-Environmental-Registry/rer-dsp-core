@@ -8,6 +8,7 @@ set -e
 
 MODE="${DSP_MIGRATION_EXECUTION_MODE:-once}"
 JAVA_BIN="java ${JAVA_OPTS:--XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0} -jar /app/app.jar"
+PUBLISH_GEOSERVERS="/publish-geoservers.sh"
 
 if [ -n "${DSP_MIGRATION_TZ:-}" ]; then
   TZ="$DSP_MIGRATION_TZ"
@@ -35,6 +36,14 @@ run_jar() {
     echo "[entrypoint] Migration cycle failed (exit ${status})" >&2
   fi
   return "$status"
+}
+
+publish_geoservers_after_first_load() {
+  if [ ! -f "$PUBLISH_GEOSERVERS" ]; then
+    echo "[entrypoint] ${PUBLISH_GEOSERVERS} not found — skip GeoServer populate" >&2
+    return 0
+  fi
+  sh "$PUBLISH_GEOSERVERS"
 }
 
 # Empty DSP_MIGRATION_SCHEDULED_AT: no wait (option 2 continuous).
@@ -67,8 +76,12 @@ run_deferred_first_load() {
     return 0
   fi
   wait_until_scheduled
-  run_jar || true
+  if ! run_jar; then
+    echo "[entrypoint] deferred first load failed — not publishing GeoServer layers" >&2
+    return 1
+  fi
   touch "$marker"
+  publish_geoservers_after_first_load || true
 }
 
 case "$MODE" in
@@ -83,7 +96,10 @@ case "$MODE" in
       exit 1
     fi
     wait_until_scheduled
-    run_jar
+    if ! run_jar; then
+      exit 1
+    fi
+    publish_geoservers_after_first_load
     exit $?
     ;;
 
@@ -97,7 +113,7 @@ case "$MODE" in
       echo "[entrypoint] supercronic not found in the image — rebuild dsp-job-migration" >&2
       exit 1
     fi
-    run_deferred_first_load
+    run_deferred_first_load || true
     WRAPPER="/tmp/dsp-migration-run.sh"
     cat >"$WRAPPER" <<'EOF'
 #!/bin/sh
@@ -115,6 +131,9 @@ status=$?
 set -e
 if [ "$status" -eq 0 ]; then
   echo "[entrypoint] Migration cycle finished successfully"
+  if [ -n "${DSP_MIGRATION_SCHEDULED_AT:-}" ] && [ -f /publish-geoservers.sh ]; then
+    sh /publish-geoservers.sh || true
+  fi
   exit 0
 fi
 echo "[entrypoint] Migration cycle failed (exit ${status})" >&2

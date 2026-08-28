@@ -13,8 +13,8 @@ Both `dsp-job-migration` and `dsp-job-migration-db` use Compose profile `migrati
 | `DSP_MIGRATION_EXECUTION_MODE` | Behaviour |
 | --- | --- |
 | `once` (default) | Runs `java -jar /app/app.jar` and exits — used by `compose run --rm` and setup option 2 |
-| `continuous` | If `DSP_MIGRATION_SCHEDULED_AT` is set (option 3), waits, runs one first load, then `supercronic` on `DSP_MIGRATION_CRON`. Option 2 continuous has no wait (first load already ran in setup). |
-| `scheduled-once` | Waits until `DSP_MIGRATION_SCHEDULED_AT`, runs once, exits (setup option 3 + once) |
+| `continuous` | If `DSP_MIGRATION_SCHEDULED_AT` is set (option 3), waits, runs one first load, publishes both GeoServers, then `supercronic` on `DSP_MIGRATION_CRON`. Option 2 continuous has no wait (first load and populate already ran in setup). |
+| `scheduled-once` | Waits until `DSP_MIGRATION_SCHEDULED_AT`, runs once, publishes both GeoServers, exits (setup option 3 + once) |
 
 | Variable | Notes |
 | --- | --- |
@@ -23,6 +23,8 @@ Both `dsp-job-migration` and `dsp-job-migration-db` use Compose profile `migrati
 | `DSP_MIGRATION_TZ` | IANA timezone for wall clock. Default `UTC`. |
 
 The JAR stays one-shot. Overlap: `flock` in the supercronic wrapper. A failed JAR does not stop the continuous container.
+
+Option 3: [`publish_geoservers.sh`](publish_geoservers.sh) runs the same `populate_geoserver.sh` used by `./setup.sh`, against Exhibition and Download on the Docker network, after the first successful scheduled load.
 
 ## Commands
 

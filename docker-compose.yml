@@ -84,6 +84,9 @@ services:
     volumes:
       - ./config/Job-Data-Migration/application/application.yaml:/config/application.yaml:ro
       - ./config/Job-Data-Migration/docker/entrypoint.sh:/migration-entrypoint.sh:ro
+      - ./config/Job-Data-Migration/docker/publish_geoservers.sh:/publish-geoservers.sh:ro
+      - ./config/GeoserverExhibition/docker/populate_geoserver.sh:/opt/populate_geoserver.sh:ro
+      - ./config/map/mapLayersConfig.json:/config/mapLayersConfig.json:ro
     environment:
       SPRING_CONFIG_LOCATION: file:/config/application.yaml
       SPRING_MAIN_WEB_APPLICATION_TYPE: none
@@ -99,6 +102,12 @@ services:
       LAYER_SRS_TERRITORY_LEVEL_2: ${LAYER_SRS_TERRITORY_LEVEL_2:-4326}
       LAYER_SRS_TERRITORY_LEVEL_3: ${LAYER_SRS_TERRITORY_LEVEL_3:-4326}
       LAYER_SRS_AREA_OF_INTEREST: ${LAYER_SRS_AREA_OF_INTEREST:-4326}
+      DSP_GEOSERVER_ADMIN_USER: ${DSP_GEOSERVER_ADMIN_USER:-admin}
+      DSP_GEOSERVER_ADMIN_PASSWORD: ${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      DSP_GEOSERVER_DB_NAME: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
+      DSP_GEOSERVER_DB_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      DSP_GEOSERVER_DB_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
+      MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

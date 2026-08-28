@@ -1164,6 +1164,9 @@ print_migration_resync_hints() {
   tz="${DSP_MIGRATION_TZ:-UTC}"
   echo ""
   echo "Migration execution mode: ${mode} (tz=${tz}${cron:+ cron=${cron}})"
+  if [ -n "${DSP_MIGRATION_SCHEDULED_AT:-}" ]; then
+    echo "GeoServer layers are published automatically after the first scheduled migration."
+  fi
   echo "Optional one-shot re-sync (in addition to the schedule):"
   echo "  docker compose --env-file .env --profile migration run --rm -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration"
 }
@@ -1851,13 +1854,14 @@ start_geoserver_exhibition() {
     info "No migration YAML — using LAYER_SRS_* defaults (demonstration / no migration)."
   fi
 
-  if [ "$mode" = "populate" ]; then
-    info "Building and starting GeoServer Exhibition..."
-    docker compose --env-file .env up -d --build dsp-geoserver-exhibition
-  else
+  if [ "$mode" = "up" ]; then
     # start.sh: ensure the container is up without forced rebuild (setup already published layers).
     info "Starting GeoServer Exhibition..."
     docker compose --env-file .env up -d dsp-geoserver-exhibition
+  else
+    # populate | start — setup builds the image; populate also publishes layers.
+    info "Building and starting GeoServer Exhibition..."
+    docker compose --env-file .env up -d --build dsp-geoserver-exhibition
   fi
   ok "GeoServer Exhibition container started"
 
@@ -1884,12 +1888,12 @@ start_geoserver_exhibition() {
 start_geoserver_download() {
   local mode="${1:-up}"
 
-  if [ "$mode" = "populate" ]; then
-    info "Building and starting GeoServer Download..."
-    docker compose --env-file .env up -d --build dsp-geoserver-download
-  else
+  if [ "$mode" = "up" ]; then
     info "Starting GeoServer Download..."
     docker compose --env-file .env up -d dsp-geoserver-download
+  else
+    info "Building and starting GeoServer Download..."
+    docker compose --env-file .env up -d --build dsp-geoserver-download
   fi
   ok "GeoServer Download container started"
 
