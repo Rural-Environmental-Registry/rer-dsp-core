@@ -12,6 +12,7 @@ import select
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -1297,52 +1298,101 @@ def build_extra_map_layer(entry: dict[str, Any], group_json_key: str) -> dict[st
     }
 
 
+ABOUT_MARKDOWN_SUFFIXES = {".md", ".markdown"}
+
+
+def slugify_about_filename(label: str, suffix: str, fallback: str) -> str:
+    """Build a destination file name from the tab label."""
+    normalized = unicodedata.normalize("NFKD", label)
+    ascii_label = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_label.lower()).strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    if not slug:
+        slug = fallback
+    ext = suffix.lower() if suffix.startswith(".") else f".{suffix.lower()}"
+    if ext not in ABOUT_MARKDOWN_SUFFIXES:
+        ext = ".md"
+    return f"{slug}{ext}"
+
+
+def resolve_about_source_path(raw: str) -> Path:
+    """Resolve an absolute path, a CWD-relative path, or a ~/ path."""
+    return Path(raw).expanduser().resolve()
+
+
+def is_inside_about_dir(path: Path, about_dir: Path) -> bool:
+    """True when the file sits directly in config/about/ (not a subfolder)."""
+    try:
+        return path.resolve().parent == about_dir.resolve()
+    except OSError:
+        return False
+
+
+def is_safe_about_filename(file_name: str) -> bool:
+    """Accept only a Markdown file name, with no folder, ~, or absolute path."""
+    if not isinstance(file_name, str):
+        return False
+    name = file_name.strip()
+    if not name or name != Path(name).name:
+        return False
+    if name in {".", ".."} or "~" in name:
+        return False
+    if Path(name).is_absolute():
+        return False
+    return Path(name).suffix.lower() in ABOUT_MARKDOWN_SUFFIXES
+
+
+def about_tab_destination(label: str, source: Path, about_dir: Path, fallback: str) -> str:
+    """File name in config/about/: keep the current name if already there, else slug the label."""
+    if is_inside_about_dir(source, about_dir):
+        return source.name
+    return slugify_about_filename(label, source.suffix, fallback)
+
+
 def build_about_config(values: dict[str, Any], about_dir: Path) -> dict[str, Any]:
     """Build about-config.json from about.* adopter settings."""
     about = get(values, "about", default={}) or {}
     enabled = bool(about.get("enabled", False))
     if not enabled:
-        return {"enabled": False, "bannerTitle": "About", "defaultTabId": None, "tabs": []}
+        return {"enabled": False, "bannerTitle": "About", "tabs": []}
 
     raw_tabs = about.get("tabs")
     if not isinstance(raw_tabs, list) or not raw_tabs:
         raise ValueError("about.tabs must have at least one entry when about.enabled is true.")
 
     tabs: list[dict[str, str]] = []
-    seen_ids: set[str] = set()
     for index, tab in enumerate(raw_tabs):
         prefix = f"about.tabs[{index}]"
         if not isinstance(tab, dict):
-            raise ValueError(f"{prefix} must be a mapping with id, label, and file.")
-        tab_id = tab.get("id")
+            raise ValueError(f"{prefix} must be a mapping with label and file.")
         label = tab.get("label")
         file_name = tab.get("file")
-        if not isinstance(tab_id, str) or not tab_id.strip():
-            raise ValueError(f"{prefix}.id is required.")
         if not isinstance(label, str) or not label.strip():
             raise ValueError(f"{prefix}.label is required.")
         if not isinstance(file_name, str) or not file_name.strip():
             raise ValueError(f"{prefix}.file is required.")
-        tab_id = tab_id.strip()
         file_name = file_name.strip()
-        if tab_id in seen_ids:
-            raise ValueError(f"about.tabs: duplicate id '{tab_id}'.")
-        seen_ids.add(tab_id)
+        if not is_safe_about_filename(file_name):
+            raise ValueError(
+                f"{prefix}.file '{file_name}' must be a .md or .markdown file name "
+                f"inside {about_dir} (no folders or absolute paths). "
+                "Use ./config.sh to copy a file from elsewhere."
+            )
         if not (about_dir / file_name).is_file():
             raise ValueError(
-                f"{prefix}.file '{file_name}' does not exist in {about_dir}. "
-                "Create the Markdown file before running ./config.sh."
+                f"{prefix}.file '{file_name}' does not exist in {about_dir}."
             )
-        tabs.append({"id": tab_id, "label": label.strip(), "file": file_name})
-
-    default_tab_id = about.get("default_tab_id")
-    if default_tab_id not in seen_ids:
-        default_tab_id = tabs[0]["id"]
+        tabs.append(
+            {
+                "id": f"tab-{index + 1}",
+                "label": label.strip(),
+                "file": file_name,
+            }
+        )
 
     return {
         "enabled": True,
         "bannerTitle": str(about.get("banner_title") or "About"),
-        "defaultTabId": default_tab_id,
         "tabs": tabs,
     }
 
@@ -2105,17 +2155,16 @@ def wizard(example: Path, active: Path, *, edit: bool = False, root: Path | None
     return True
 
 
-ABOUT_MAX_TABS = 8
-
-
 def ask_about_page(config: dict[str, Any], about_dir: Path) -> None:
     """Configure the optional custom About page (about.enabled + tabs)."""
     about = config.setdefault("about", {})
+    about_dir = about_dir.resolve()
     print("\n" + "=" * 72)
     print("Optional — Custom About page")
     print("=" * 72)
     print("  What: Replaces the built-in About page with tabs rendered from")
-    print(f"        Markdown files in {about_dir}")
+    print("        Markdown files. Paths outside the project are copied into")
+    print(f"        {about_dir}")
     print("  Used in: the frontend About page")
     enabled = ask_bool(
         "Enable a custom About page", bool(about.get("enabled", False))
@@ -2124,81 +2173,89 @@ def ask_about_page(config: dict[str, Any], about_dir: Path) -> None:
     if not enabled:
         return
 
-    tab_count = ask_int_field(
-        "Number of About tabs",
-        len(about.get("tabs") or []) or 1,
-        "How many tabs the About page will show.",
-        "the frontend About page",
-        minimum=1,
-        maximum=ABOUT_MAX_TABS,
-    )
-
-    existing_tabs = about.get("tabs") or []
-    tabs: list[dict[str, str]] = []
-    for index in range(tab_count):
-        existing = existing_tabs[index] if index < len(existing_tabs) else {}
-        default_id = existing.get("id") or f"tab-{index + 1}"
-        default_label = existing.get("label") or f"Tab {index + 1}"
-        default_file = existing.get("file") or ""
-
-        tab_id = ask_field(
-            f"About tab {index + 1} — id",
-            default_id,
-            "Unique identifier for this tab (used by the frontend).",
-            "the frontend About page",
-        )
-        label = ask_field(
-            f"About tab {index + 1} — label",
-            default_label,
-            "Text shown on the tab.",
-            "the frontend About page",
-        )
-        while True:
-            file_name = str(
-                ask_field(
-                    f"About tab {index + 1} — Markdown file",
-                    default_file or "overview.md",
-                    f"File name relative to {about_dir} (must already exist there).",
-                    "the frontend About page",
-                )
-            ).strip()
-            if not file_name or "<" in file_name:
-                print("\n  Enter a file name (e.g. overview.md).")
-                continue
-            if not (about_dir / file_name).is_file():
-                print(
-                    f"\n  File not found: {about_dir / file_name}. "
-                    f"Create it in {about_dir} first (see the .md.example files there)."
-                )
-                continue
-            break
-        tabs.append({"id": str(tab_id).strip(), "label": str(label).strip(), "file": file_name})
-
-    ids = [tab["id"] for tab in tabs]
-    if len(set(ids)) != len(ids):
-        raise ValueError("about.tabs ids must be unique.")
-
-    about["tabs"] = tabs
-    default_tab_id = about.get("default_tab_id")
-    if default_tab_id not in ids:
-        default_tab_id = ids[0]
-    about["default_tab_id"] = ask_field(
-        "About page — default tab id",
-        default_tab_id,
-        "Tab id shown by default when the About page opens.",
-        "the frontend About page",
-    )
-    if about["default_tab_id"] not in ids:
-        raise ValueError(
-            f"about.default_tab_id '{about['default_tab_id']}' must match one of the tab ids: "
-            + ", ".join(ids)
-        )
     about["banner_title"] = ask_field(
         "About page — banner title",
         about.get("banner_title", "About"),
         "Title shown at the top of the About page.",
         "the frontend About page",
     )
+
+    tab_count = ask_int_field(
+        "Number of About tabs",
+        len(about.get("tabs") or []) or 1,
+        "How many tabs the About page will show.",
+        "the frontend About page",
+        minimum=1,
+    )
+
+    existing_tabs = about.get("tabs") or []
+    tabs: list[dict[str, str]] = []
+    for index in range(tab_count):
+        existing = existing_tabs[index] if index < len(existing_tabs) else {}
+        default_label = existing.get("label") or f"Tab {index + 1}"
+        existing_file = str(existing.get("file") or "").strip()
+        default_path = ""
+        if existing_file:
+            candidate = about_dir / existing_file
+            if candidate.is_file():
+                default_path = str(candidate)
+
+        while True:
+            label = str(
+                ask_field(
+                    f"About tab {index + 1} — label",
+                    default_label,
+                    "Text shown on the tab.",
+                    "the frontend About page",
+                )
+            ).strip()
+            if label:
+                break
+            print("\n  Enter a non-empty tab label.")
+
+        fallback = f"tab-{index + 1}"
+        while True:
+            raw_path = str(
+                ask_field(
+                    f"About tab {index + 1} — Markdown file",
+                    default_path,
+                    "Path to a .md or .markdown file on this computer. "
+                    f"Files outside {about_dir} are copied there.",
+                    "the frontend About page",
+                )
+            ).strip()
+            if not raw_path or "<" in raw_path:
+                print("\n  Enter a path to a Markdown file (e.g. ~/docs/overview.md).")
+                continue
+            source = resolve_about_source_path(raw_path)
+            if not source.is_file():
+                print(f"\n  File not found: {source}")
+                continue
+            if source.suffix.lower() not in ABOUT_MARKDOWN_SUFFIXES:
+                print("\n  The file must have a .md or .markdown extension.")
+                continue
+            dest_name = about_tab_destination(label, source, about_dir, fallback)
+            if not is_safe_about_filename(dest_name):
+                print("\n  The destination file name is not allowed.")
+                continue
+            dest = about_dir / dest_name
+            if is_inside_about_dir(source, about_dir):
+                tabs.append({"label": label, "file": dest_name})
+                break
+            if dest.exists() and dest.resolve() != source.resolve():
+                if not ask_bool(f"Overwrite existing file {dest.name}", False):
+                    print("\n  Choose a different Markdown file.")
+                    continue
+            try:
+                about_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, dest)
+            except OSError as exc:
+                print(f"\n  Could not copy the file: {exc}")
+                continue
+            tabs.append({"label": label, "file": dest_name})
+            break
+
+    about["tabs"] = tabs
 
 
 def replace_env(env_file: Path, values: dict[str, Any]) -> None:

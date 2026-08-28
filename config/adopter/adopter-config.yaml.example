@@ -259,11 +259,10 @@ map:
 about:
   # Custom "About" page, built from Markdown files in config/about/.
   # enabled: false hides the page entirely.
-  # Each tab file must exist in config/about/ before ./config.sh is run.
+  # file is only the file name already in config/about/ (e.g. overview.md).
+  # Use ./config.sh to copy a .md from anywhere on this computer into that folder.
   enabled: false
   banner_title: "About"
-  default_tab_id: "overview"
   tabs:
-    - id: "overview"
-      label: "Overview"
+    - label: "Overview"
       file: "overview.md"

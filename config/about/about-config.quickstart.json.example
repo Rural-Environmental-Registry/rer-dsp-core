@@ -1,25 +1,24 @@
 {
   "enabled": true,
   "bannerTitle": "About the DSP",
-  "defaultTabId": "overview",
   "tabs": [
     {
-      "id": "overview",
+      "id": "tab-1",
       "label": "Overview",
       "file": "overview.md"
     },
     {
-      "id": "features",
+      "id": "tab-2",
       "label": "Features",
       "file": "features.md"
     },
     {
-      "id": "configuration",
+      "id": "tab-3",
       "label": "Configuration",
       "file": "configuration.md"
     },
     {
-      "id": "license",
+      "id": "tab-4",
       "label": "License",
       "file": "license.md"
     }
