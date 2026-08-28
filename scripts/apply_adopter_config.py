@@ -1569,9 +1569,8 @@ def ask_screen_text_fields(screens: dict[str, Any]) -> None:
         "the home screen search form",
     )
 
-    print("\n  Home detail labels")
-    print("  What: Text shown on the registration detail panel after a search.")
-    print("  Used in: the home screen detail panel")
+    print("\n  --- Home detail labels ---")
+    print("  Text shown on the registration detail panel after a search.")
     detail = screens.setdefault("detail", {})
     detail_fields = (
         ("section_title", "Detail section title", "Search details"),
@@ -1590,9 +1589,8 @@ def ask_screen_text_fields(screens: dict[str, Any]) -> None:
             "the home screen detail panel",
         )
 
-    print("\n  Downloads screen labels")
-    print("  What: Text shown on filters and section headers in the downloads screen.")
-    print("  Used in: the downloads screen")
+    print("\n  --- Downloads screen labels ---")
+    print("  Text shown on filters and section headers in the downloads screen.")
     downloads = screens.setdefault("downloads", {})
     theme = downloads.setdefault("theme", {})
     theme["label"] = ask_field(
