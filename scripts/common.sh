@@ -654,10 +654,10 @@ print_migration_preview() {
   info "Migration configuration preview:"
   echo "  Job execution: ${run_label}"
   if [ -n "${MIGRATION_CRON:-}" ]; then
-    echo "  Cron: ${MIGRATION_CRON} (tz=${MIGRATION_TZ:-UTC})"
+    echo "  Cron: ${MIGRATION_CRON} (tz=${DSP_MIGRATION_TZ})"
   fi
   if [ -n "${MIGRATION_SCHEDULED_AT:-}" ]; then
-    echo "  Scheduled at: ${MIGRATION_SCHEDULED_AT} (tz=${MIGRATION_TZ:-UTC})"
+    echo "  Scheduled at: ${MIGRATION_SCHEDULED_AT} (tz=${DSP_MIGRATION_TZ})"
   fi
   echo "  Datasources:"
   echo "    batch:  ${batch_url:-<missing>} (user: ${batch_user:-<missing>})"
@@ -715,6 +715,16 @@ wait_for_db_schema() {
     sleep 1
   done
   return 1
+}
+
+wait_for_data_migration_schema() {
+  info "Waiting for dsp-db schema data_migration..."
+  if ! wait_for_db_schema dsp-db "${DSP_DB_USER:-dsp}" "${DSP_DB_NAME:-dsp-db}" data_migration; then
+    error "dsp-db init SQL did not create schema 'data_migration' in time."
+    docker compose --env-file .env logs --tail 40 dsp-db || true
+    exit 1
+  fi
+  ok "dsp-db schema data_migration ready"
 }
 
 validate_positive_integer() {
@@ -1115,7 +1125,7 @@ migration_scheduled_once_completed() {
 
 persist_migration_env() {
   set_env_var "DSP_MIGRATION_EXECUTION_MODE" "${MIGRATION_EXECUTION_MODE:-once}"
-  set_env_var "DSP_MIGRATION_TZ" "${MIGRATION_TZ:-${TZ:-UTC}}"
+  set_env_var "DSP_MIGRATION_TZ" "${DSP_MIGRATION_TZ}"
   set_env_var "DSP_MIGRATION_CRON" "${MIGRATION_CRON:-}"
   set_env_var "DSP_MIGRATION_SCHEDULED_AT" "${MIGRATION_SCHEDULED_AT:-}"
 }
@@ -1128,17 +1138,12 @@ run_migration_job_once() {
 
 start_migration_service_stack() {
   info "Starting migration service stack (profile=migration)..."
-  docker compose --env-file .env --profile migration up -d dsp-job-migration-db dsp-job-migration
+  wait_for_data_migration_schema
+  docker compose --env-file .env --profile migration up -d dsp-job-migration
   if is_continuous_migration_mode; then
     docker update --restart unless-stopped dsp-job-migration >/dev/null 2>&1 || true
   else
     docker update --restart no dsp-job-migration >/dev/null 2>&1 || true
-  fi
-
-  info "Waiting for dsp-job-migration-db..."
-  if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
-    error "dsp-job-migration-db did not become ready in time."
-    exit 1
   fi
   ok "Migration service stack ready"
 }
@@ -1161,7 +1166,7 @@ print_migration_resync_hints() {
   local mode cron tz
   mode="$(get_migration_execution_mode)"
   cron="${DSP_MIGRATION_CRON:-}"
-  tz="${DSP_MIGRATION_TZ:-UTC}"
+  tz="${DSP_MIGRATION_TZ}"
   echo ""
   echo "Migration execution mode: ${mode} (tz=${tz}${cron:+ cron=${cron}})"
   if [ -n "${DSP_MIGRATION_SCHEDULED_AT:-}" ]; then
@@ -1203,14 +1208,8 @@ ensure_adopter_config() {
 start_databases_and_wait() {
   local include_migration_db="${1:-false}"
 
-  if [ "$include_migration_db" = "true" ]; then
-    info "Starting databases (dsp-db, dsp-geoserver-db, dsp-job-migration-db)..."
-    docker compose --env-file .env --profile migration up -d \
-      dsp-db dsp-geoserver-db dsp-job-migration-db
-  else
-    info "Starting databases (dsp-db, dsp-geoserver-db)..."
-    docker compose --env-file .env up -d dsp-db dsp-geoserver-db
-  fi
+  info "Starting databases (dsp-db, dsp-geoserver-db)..."
+  docker compose --env-file .env up -d dsp-db dsp-geoserver-db
   ok "Database containers started"
 
   info "Waiting for databases to become healthy..."
@@ -1237,11 +1236,7 @@ start_databases_and_wait() {
   ok "dsp-geoserver-db ready"
 
   if [ "$include_migration_db" = "true" ]; then
-    if ! wait_for_db dsp-job-migration-db "${DSP_JOB_MIGRATION_DB_USER:-dsp_job}" "${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}"; then
-      error "dsp-job-migration-db did not become ready in time."
-      exit 1
-    fi
-    ok "dsp-job-migration-db ready"
+    wait_for_data_migration_schema
   fi
   ok "Databases are ready"
 }
@@ -1249,7 +1244,7 @@ start_databases_and_wait() {
 # Runtime stack status helpers (container state / Docker healthcheck — no HTTP probes).
 
 is_stack_optional_service() {
-  [ "$1" = "dsp-job-migration-db" ]
+  false
 }
 
 get_stack_runtime_services() {
@@ -1568,12 +1563,12 @@ prompt_migration_how_often() {
 }
 
 # Option 3 + once or continuous. Sets MIGRATION_SCHEDULED_AT and MIGRATION_HHMM.
+# Fuso: DSP_MIGRATION_TZ (já carregado do .env por ensure_dotenv).
 prompt_migration_when() {
   local date_ymd today
-  MIGRATION_TZ="${TZ:-UTC}"
   echo ""
   echo "When should the migration start?"
-  today="$(TZ="${MIGRATION_TZ}" date +%F)"
+  today="$(TZ="${DSP_MIGRATION_TZ}" date +%F)"
   while true; do
     read -r -p "Date (YYYY-MM-DD) [${today}]: " date_ymd || true
     if [ -z "$date_ymd" ]; then
@@ -1584,9 +1579,9 @@ prompt_migration_when() {
       continue
     fi
     prompt_migration_hhmm "Time" "22:00"
-    if dsp_datetime_is_future "$date_ymd" "$MIGRATION_HHMM" "$MIGRATION_TZ"; then
+    if dsp_datetime_is_future "$date_ymd" "$MIGRATION_HHMM" "$DSP_MIGRATION_TZ"; then
       MIGRATION_SCHEDULED_AT="${date_ymd} ${MIGRATION_HHMM}:00"
-      ok "Scheduled for ${MIGRATION_SCHEDULED_AT} (${MIGRATION_TZ})"
+      ok "Scheduled for ${MIGRATION_SCHEDULED_AT} (${DSP_MIGRATION_TZ})"
       return 0
     fi
     error "That date/time is in the past. Choose a future time."
@@ -1598,7 +1593,6 @@ prompt_deferred_migration_plan() {
   KEEP_MIGRATION_SERVICE=true
   MIGRATION_CRON=""
   MIGRATION_SCHEDULED_AT=""
-  MIGRATION_TZ="${TZ:-UTC}"
   echo ""
   echo "How should the migration job run after setup?"
   echo ""
@@ -1636,7 +1630,6 @@ prompt_migration_execution_mode() {
   KEEP_MIGRATION_SERVICE=false
   MIGRATION_CRON=""
   MIGRATION_SCHEDULED_AT=""
-  MIGRATION_TZ="${TZ:-UTC}"
   echo ""
   echo "How should the migration job run after setup?"
   echo ""
@@ -1956,7 +1949,6 @@ print_stack_urls() {
   local frontend_url="${base_url}${VITE_BASE_URL:-/dsp/}"
   local backend_url="${base_url}${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}"
   local svc_status=""
-  local migration_db_url="${http_host}:${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}  db=${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}  user=${DSP_JOB_MIGRATION_DB_USER:-dsp_job}"
 
   load_stack_service_statuses
 
@@ -1980,10 +1972,6 @@ print_stack_urls() {
     print_stack_url_line "DSP DB" "$svc_status" "${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
     svc_status="$(stack_service_status dsp-geoserver-db)"
     print_stack_url_line "GeoServer DB" "$svc_status" "${http_host}:${DSP_GEOSERVER_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}  user=${DSP_GEOSERVER_DB_USER:-dsp_geo}"
-    if is_stack_service_up dsp-job-migration-db; then
-      svc_status="$(stack_service_status dsp-job-migration-db)"
-      print_stack_url_line "Job migration DB" "$svc_status" "$migration_db_url"
-    fi
     if is_persistent_migration_mode && is_stack_service_up dsp-job-migration; then
       svc_status="$(stack_service_status dsp-job-migration)"
       print_stack_url_line "Migration job (service)" "$svc_status" "mode=$(get_migration_execution_mode)${DSP_MIGRATION_CRON:+ cron=${DSP_MIGRATION_CRON}}${DSP_MIGRATION_SCHEDULED_AT:+ at=${DSP_MIGRATION_SCHEDULED_AT}}"
@@ -2003,9 +1991,6 @@ print_stack_urls() {
   echo "GeoServer Download WFS: ${geoserver_download_url}/dsp/wfs"
   echo "DSP DB:                ${http_host}:${DSP_DB_HOST_PORT:-20654}  db=${DSP_DB_NAME:-dsp-db}  user=${DSP_DB_USER:-dsp}"
   echo "GeoServer DB: ${http_host}:${DSP_GEOSERVER_DB_HOST_PORT:-20656}  db=${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}  user=${DSP_GEOSERVER_DB_USER:-dsp_geo}"
-  if is_stack_service_up dsp-job-migration-db; then
-    echo "Job migration DB:      ${migration_db_url}"
-  fi
   if is_persistent_migration_mode && is_stack_service_up dsp-job-migration; then
     echo "Migration job:         $(get_migration_execution_mode)${DSP_MIGRATION_CRON:+ cron=${DSP_MIGRATION_CRON}}${DSP_MIGRATION_SCHEDULED_AT:+ at=${DSP_MIGRATION_SCHEDULED_AT}}"
   fi
@@ -2015,6 +2000,7 @@ print_stack_usage_hints() {
   echo ""
   echo "Verify tables:"
   echo "  docker compose exec dsp-db psql -U ${DSP_DB_USER:-dsp} -d ${DSP_DB_NAME:-dsp-db} -c '\\dt dsp.*'"
+  echo "  docker compose exec dsp-db psql -U ${DSP_DB_USER:-dsp} -d ${DSP_DB_NAME:-dsp-db} -c '\\dt data_migration.*'"
   echo "  docker compose exec dsp-geoserver-db psql -U ${DSP_GEOSERVER_DB_USER:-dsp_geo} -d ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db} -c '\\dt dsp.*'"
   echo ""
   echo "Migrate / (re)populate data:"

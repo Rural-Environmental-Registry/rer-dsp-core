@@ -52,10 +52,10 @@ step_header 6 "Confirmation"
 if is_persistent_migration_mode; then
   info "Scheduled migration is enabled — ./start.sh will keep the migration stack running when needed."
   if [ -n "${DSP_MIGRATION_CRON:-}" ]; then
-    info "Cron: ${DSP_MIGRATION_CRON} (tz=${DSP_MIGRATION_TZ:-UTC})"
+    info "Cron: ${DSP_MIGRATION_CRON} (tz=${DSP_MIGRATION_TZ})"
   fi
   if [ -n "${DSP_MIGRATION_SCHEDULED_AT:-}" ]; then
-    info "First load at: ${DSP_MIGRATION_SCHEDULED_AT} (tz=${DSP_MIGRATION_TZ:-UTC})"
+    info "First load at: ${DSP_MIGRATION_SCHEDULED_AT} (tz=${DSP_MIGRATION_TZ})"
   fi
 else
   info "This script starts the application stack only (no data migration)."

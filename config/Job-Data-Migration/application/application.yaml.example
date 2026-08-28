@@ -9,9 +9,9 @@ spring:
     web-application-type: "none"
   datasource:
     batch:
-      url: "jdbc:postgresql://dsp-job-migration-db:5432/dsp-job-migration-db"
-      username: "dsp_job"
-      password: "dsp_job"
+      url: "jdbc:postgresql://dsp-db:5432/dsp-db?currentSchema=data_migration"
+      username: "dsp"
+      password: "dsp"
       driver-class-name: "org.postgresql.Driver"
       hikari:
         maximum-pool-size: 10

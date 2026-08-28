@@ -46,30 +46,6 @@ services:
     networks:
       - dsp_network
 
-  dsp-job-migration-db:
-    image: postgres:16
-    container_name: dsp-job-migration-db
-    profiles:
-      - migration
-    restart: unless-stopped
-    ports:
-      - "${DSP_JOB_MIGRATION_DB_HOST_PORT:-20655}:5432"
-    environment:
-      POSTGRES_DB: ${DSP_JOB_MIGRATION_DB_NAME:-dsp-job-migration-db}
-      POSTGRES_USER: ${DSP_JOB_MIGRATION_DB_USER:-dsp_job}
-      POSTGRES_PASSWORD: ${DSP_JOB_MIGRATION_DB_PASSWORD:-dsp_job}
-    volumes:
-      - dsp_job_migration_db_data:/var/lib/postgresql/data
-      - ./config/db/dsp-job-migration-db:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d \"$${POSTGRES_DB}\""]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-    networks:
-      - dsp_network
-
   dsp-job-migration:
     image: dsp-job-migration:local
     build:
@@ -93,8 +69,8 @@ services:
       DSP_MIGRATION_EXECUTION_MODE: ${DSP_MIGRATION_EXECUTION_MODE:-once}
       DSP_MIGRATION_CRON: "${DSP_MIGRATION_CRON:-0 22 * * *}"
       DSP_MIGRATION_SCHEDULED_AT: "${DSP_MIGRATION_SCHEDULED_AT:-}"
-      DSP_MIGRATION_TZ: ${DSP_MIGRATION_TZ:-UTC}
-      TZ: ${DSP_MIGRATION_TZ:-UTC}
+      DSP_MIGRATION_TZ: ${DSP_MIGRATION_TZ}
+      TZ: ${DSP_MIGRATION_TZ}
       DSP_SOURCE_JDBC_URL: ${DSP_SOURCE_JDBC_URL}
       DSP_SOURCE_DB_USER: ${DSP_SOURCE_DB_USER}
       DSP_SOURCE_DB_PASSWORD: ${DSP_SOURCE_DB_PASSWORD}
@@ -114,8 +90,6 @@ services:
       dsp-db:
         condition: service_healthy
       dsp-geoserver-db:
-        condition: service_healthy
-      dsp-job-migration-db:
         condition: service_healthy
     networks:
       - dsp_network
@@ -308,7 +282,6 @@ networks:
 volumes:
   dsp_db_data:
   dsp_geoserver_db_data:
-  dsp_job_migration_db_data:
   dsp_geoserver_exhibition_data:
   dsp_geoserver_download_data:
   dsp_gateway_cache:

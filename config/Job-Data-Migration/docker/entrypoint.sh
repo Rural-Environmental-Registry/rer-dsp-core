@@ -12,9 +12,7 @@ PUBLISH_GEOSERVERS="/publish-geoservers.sh"
 
 if [ -n "${DSP_MIGRATION_TZ:-}" ]; then
   TZ="$DSP_MIGRATION_TZ"
-  export TZ
 fi
-TZ="${TZ:-UTC}"
 export TZ
 
 valid_cron_5() {

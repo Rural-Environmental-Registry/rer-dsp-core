@@ -27,7 +27,7 @@ configuração do adotante para toda a stack DSP.
 
 ## Responsabilidades
 
-- Subir e configurar os bancos de dados (`dsp-db`, `dsp-job-migration-db`)
+- Subir e configurar os bancos de dados (`dsp-db`, `dsp-geoserver-db`)
 - Subir o GeoServer de exibição (WMS)
 - Subir o gateway nginx (`dsp-gateway`), porta de entrada única da stack
 - Guiar a configuração do adotante (hierarquia, telas, KPIs, camadas do mapa,
