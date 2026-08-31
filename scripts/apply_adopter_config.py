@@ -25,7 +25,6 @@ except ImportError:
 # URLs consumidas pelo browser, portanto passam pelo gateway (DSP_PUBLIC_BASE_URL no .env).
 PUBLIC_BASE_URL = os.environ.get("DSP_PUBLIC_BASE_URL", "http://localhost:8026").rstrip("/")
 FIXED_WMS_BASE_URL = f"{PUBLIC_BASE_URL}/geoserver-exhibition/dsp/wms"
-FIXED_WMS_BASE_URL = "http://localhost:22668/geoserver/dsp/wms"
 # Downloads use GeoServer Download (separate from map Exhibition WMS).
 FIXED_WFS_BASE_URL = f"{PUBLIC_BASE_URL}/geoserver-download/dsp/wfs"
 HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
