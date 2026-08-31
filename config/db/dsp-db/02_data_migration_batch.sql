@@ -1,9 +1,9 @@
--- Spring Batch 5.2.x + SYNC_STATE no schema data_migration (PostgreSQL).
--- O job usa spring.batch.jdbc.initialize-schema=never.
+-- Spring Batch 5.2.x + SYNC_STATE in schema data_migration (PostgreSQL).
+-- The job uses spring.batch.jdbc.initialize-schema=never.
 --
--- Uma cópia deste arquivo também vive em rer-dsp-job-data-migration em
--- src/main/resources/db/batch_metadata/01_spring_batch_schema.sql (execução
--- standalone). As duas cópias precisam ficar iguais.
+-- A copy of this file also lives in rer-dsp-job-data-migration at
+-- src/main/resources/db/batch_metadata/01_spring_batch_schema.sql (standalone
+-- runs). Keep both copies in sync.
 
 CREATE SCHEMA IF NOT EXISTS data_migration;
 

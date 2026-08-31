@@ -8,7 +8,7 @@ The `dsp-job-migration` service uses Compose profile `migration`. Batch metadata
 
 ## Entrypoint
 
-[`entrypoint.sh`](entrypoint.sh) is mounted as `/migration-entrypoint.sh`:
+[`entrypoint.sh`](entrypoint.sh) is copied into the image as `/migration-entrypoint.sh`:
 
 | `DSP_MIGRATION_EXECUTION_MODE` | Behaviour |
 | --- | --- |
@@ -38,7 +38,7 @@ docker compose --env-file .env --profile migration run --rm --build \
 **Scheduled service** (`continuous` or `scheduled-once`):
 
 ```bash
-docker compose --env-file .env --profile migration up -d dsp-job-migration
+docker compose --env-file .env --profile migration up -d --build dsp-job-migration
 ```
 
 Optional extra one-shot on top of the schedule:
@@ -48,4 +48,4 @@ docker compose --env-file .env --profile migration run --rm \
   -e DSP_MIGRATION_EXECUTION_MODE=once dsp-job-migration
 ```
 
-Compose mounts `../application/application.yaml`.
+The image copies `application.yaml`, `mapLayersConfig.json`, the entrypoint, `publish_geoservers.sh` and `populate_geoserver.sh` at build time.

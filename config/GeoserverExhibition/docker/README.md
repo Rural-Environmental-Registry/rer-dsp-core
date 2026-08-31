@@ -7,23 +7,24 @@ Downloads (CSV/WFS export) use a separate GeoServer — see `config/GeoserverDow
 ## Image
 
 - Base: `docker.osgeo.org/geoserver:3.0.0`
-- Build context: this directory (`config/GeoserverExhibition/docker`)
+- Build context: `rer-dsp-core/config` (`dockerfile: GeoserverExhibition/docker/Dockerfile`)
 - Compose service: `dsp-geoserver-exhibition`
+- `mapLayersConfig.json` is copied into the image at `/config/mapLayersConfig.json`
 
 ## Defaults
 
-Não publica porta no host: o acesso externo passa pelo gateway (`config/Gateway/docker`).
+Does not publish a host port: external access goes through the gateway (`config/Gateway/docker`).
 
 | Item | Value |
 | --- | --- |
-| Prefixo no gateway | `/geoserver-exhibition` |
+| Gateway prefix | `/geoserver-exhibition` |
 | UI | http://localhost:8026/geoserver-exhibition/web/ |
 | WMS | http://localhost:8026/geoserver-exhibition/dsp/wms |
 | Admin | `admin` / `geoserver` |
 
-Como o prefixo externo difere do interno (`/geoserver`), o `PROXY_BASE_URL` — derivado de
-`DSP_PUBLIC_BASE_URL` — é obrigatório: sem ele os links do GetCapabilities e da UI web apontariam
-para o path errado.
+The external prefix differs from the internal one (`/geoserver`), so `PROXY_BASE_URL` — derived from
+`DSP_PUBLIC_BASE_URL` — is required: without it, GetCapabilities and web UI links would point at
+the wrong path.
 
 ## Published layers (fixed)
 
@@ -38,7 +39,7 @@ para o path errado.
 
 `mapLayersConfig.json` must keep these four `layers` ids — `./start.sh` validates them.
 
-Layer colors come from the mounted `config/map/mapLayersConfig.json` (`style.color` / `style.fillColor`). Populate creates/updates one SLD per layer (`dsp_territory_level_*`, `dsp_area_of_interest`).
+Layer colors come from `mapLayersConfig.json` in the image (`style.color` / `style.fillColor`). Populate creates/updates one SLD per layer (`dsp_territory_level_*`, `dsp_area_of_interest`).
 
 ## Manual populate
 

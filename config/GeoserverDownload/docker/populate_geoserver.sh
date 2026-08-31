@@ -48,7 +48,7 @@ fi
 
 if [ ! -f "$MAP_LAYERS_CONFIG" ]; then
   echo "mapLayersConfig.json not found: $MAP_LAYERS_CONFIG"
-  echo "Mount config/map/mapLayersConfig.json into the container."
+  echo "Rebuild the GeoServer image after ./config.sh (./setup.sh or ./start.sh)."
   exit 1
 fi
 

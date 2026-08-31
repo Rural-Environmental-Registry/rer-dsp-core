@@ -1139,7 +1139,7 @@ run_migration_job_once() {
 start_migration_service_stack() {
   info "Starting migration service stack (profile=migration)..."
   wait_for_data_migration_schema
-  docker compose --env-file .env --profile migration up -d dsp-job-migration
+  docker compose --env-file .env --profile migration up -d --build dsp-job-migration
   if is_continuous_migration_mode; then
     docker update --restart unless-stopped dsp-job-migration >/dev/null 2>&1 || true
   else
@@ -1209,7 +1209,7 @@ start_databases_and_wait() {
   local include_migration_db="${1:-false}"
 
   info "Starting databases (dsp-db, dsp-geoserver-db)..."
-  docker compose --env-file .env up -d dsp-db dsp-geoserver-db
+  docker compose --env-file .env up -d --build dsp-db dsp-geoserver-db
   ok "Database containers started"
 
   info "Waiting for databases to become healthy..."
@@ -1848,9 +1848,9 @@ start_geoserver_exhibition() {
   fi
 
   if [ "$mode" = "up" ]; then
-    # start.sh: ensure the container is up without forced rebuild (setup already published layers).
-    info "Starting GeoServer Exhibition..."
-    docker compose --env-file .env up -d dsp-geoserver-exhibition
+    # start.sh: rebuild so map JSON in the image is current; does not republish layers.
+    info "Building and starting GeoServer Exhibition..."
+    docker compose --env-file .env up -d --build dsp-geoserver-exhibition
   else
     # populate | start — setup builds the image; populate also publishes layers.
     info "Building and starting GeoServer Exhibition..."
@@ -1882,8 +1882,8 @@ start_geoserver_download() {
   local mode="${1:-up}"
 
   if [ "$mode" = "up" ]; then
-    info "Starting GeoServer Download..."
-    docker compose --env-file .env up -d dsp-geoserver-download
+    info "Building and starting GeoServer Download..."
+    docker compose --env-file .env up -d --build dsp-geoserver-download
   else
     info "Building and starting GeoServer Download..."
     docker compose --env-file .env up -d --build dsp-geoserver-download

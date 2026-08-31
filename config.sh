@@ -11,6 +11,14 @@ CONFIG_FILE="$ROOT_DIR/config/adopter/adopter-config.yaml"
 EXAMPLE_FILE="$ROOT_DIR/config/adopter/adopter-config.yaml.example"
 APPLY="$ROOT_DIR/scripts/apply_adopter_config.py"
 
+print_config_rebuild_hint() {
+  echo ""
+  echo "Operational files were written under config/."
+  echo "They are copied into Docker images on the next build."
+  echo "Run ./setup.sh or ./start.sh so containers pick up this configuration."
+  echo ""
+}
+
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/common.sh"
 
@@ -61,10 +69,12 @@ if [ -f "$CONFIG_FILE" ]; then
   case "$choice" in
     1)
       python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE"
+      print_config_rebuild_hint
       exit 0
       ;;
     2)
       python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE" --wizard --edit
+      print_config_rebuild_hint
       exit 0
       ;;
     3)
@@ -78,3 +88,4 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 python3 "$APPLY" --root "$ROOT_DIR" --config "$CONFIG_FILE" --wizard
+print_config_rebuild_hint
