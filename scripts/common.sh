@@ -1915,8 +1915,8 @@ start_gateway() {
   base_url="$(dsp_public_base_url)"
   local i
 
-  info "Starting gateway (nginx)..."
-  docker compose --env-file .env up -d dsp-gateway
+  info "Building and starting gateway (nginx)..."
+  docker compose --env-file .env up -d --build dsp-gateway
   ok "Gateway container started"
 
   info "Waiting for the gateway at ${base_url}/gateway/health ..."

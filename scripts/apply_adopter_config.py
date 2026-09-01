@@ -23,7 +23,7 @@ except ImportError:
     termios = None
     tty = None
 
-# URLs consumidas pelo browser, portanto passam pelo gateway (DSP_PUBLIC_BASE_URL no .env).
+# URLs consumed by the browser, so they go through the gateway (DSP_PUBLIC_BASE_URL in .env).
 PUBLIC_BASE_URL = os.environ.get("DSP_PUBLIC_BASE_URL", "http://localhost:8026").rstrip("/")
 FIXED_WMS_BASE_URL = f"{PUBLIC_BASE_URL}/geoserver-exhibition/dsp/wms"
 # Downloads use GeoServer Download (separate from map Exhibition WMS).
@@ -41,6 +41,24 @@ FIXED_LAYER_IDS = {
     "dsp:territory-level-3",
     "dsp:area-of-interest",
 }
+# Target column names reserved for layers (same as LayerConfig.CANONICAL_TARGET_COLUMNS).
+LAYER_CANONICAL_TARGET_COLUMNS = (
+    "id",
+    "area_of_interest_id",
+    "created_at",
+    "updated_at",
+    "label",
+    "geom",
+)
+# Target column names reserved for AOI (same as AreaOfInterestConfig.CANONICAL_TARGET_COLUMNS).
+AOI_CANONICAL_TARGET_COLUMNS = (
+    "id",
+    "created_at",
+    "updated_at",
+    "territory_level_3_id",
+    "area",
+    "geom",
+)
 CANONICAL_AOI_DETAIL_FIELDS = (
     "id",
     "created_at",
@@ -696,6 +714,56 @@ def parse_column_list(raw: Any, prefix: str) -> list[str]:
     return unique
 
 
+def columns_clashing_with(
+    columns: list[str],
+    blocked: Any,
+    *,
+    ignore_case: bool = False,
+) -> list[str]:
+    """Return columns from `columns` that are already in the blocked set, in original order."""
+    if ignore_case:
+        blocked_lower = {str(name).lower() for name in blocked if name}
+        return [column for column in columns if column.lower() in blocked_lower]
+    blocked_set = set(blocked)
+    return [column for column in columns if column in blocked_set]
+
+
+def canonical_target_clash_reason(target_names: Any) -> str:
+    listed = ", ".join(sorted(target_names))
+    return f"collides with a canonical target column name [{listed}]."
+
+
+def reject_clashing_columns(
+    columns: list[str],
+    blocked: Any,
+    prefix: str,
+    *,
+    reason: str = "duplicates a required column mapping.",
+    ignore_case: bool = False,
+) -> None:
+    for column in columns_clashing_with(columns, blocked, ignore_case=ignore_case):
+        raise ValueError(f"{prefix} entry '{column}' {reason}")
+
+
+def reject_source_and_target_clashes(
+    columns: list[str],
+    source_blocked: Any,
+    target_blocked: Any,
+    prefix: str,
+    *,
+    target_ignore_case: bool = False,
+    source_reason: str = "duplicates a required column mapping.",
+) -> None:
+    reject_clashing_columns(columns, source_blocked, prefix, reason=source_reason)
+    reject_clashing_columns(
+        columns,
+        target_blocked,
+        prefix,
+        reason=canonical_target_clash_reason(target_blocked),
+        ignore_case=target_ignore_case,
+    )
+
+
 def ask_optional_column_list(label: str, default: Any, description: str, used_in: str) -> list[str]:
     if isinstance(default, list):
         default_display = ", ".join(default)
@@ -720,6 +788,72 @@ def ask_optional_column_list(label: str, default: Any, description: str, used_in
             return parse_column_list(text, label)
         except ValueError as exc:
             print(f"\n  {exc}")
+
+
+def _without_source_or_target(
+    columns: list[str],
+    source_blocked: Any,
+    target_blocked: Any,
+    *,
+    target_ignore_case: bool = False,
+) -> list[str]:
+    source_set = {name for name in source_blocked if name}
+    return [
+        column
+        for column in columns
+        if column not in source_set
+        and not columns_clashing_with(
+            [column], target_blocked, ignore_case=target_ignore_case
+        )
+    ]
+
+
+def ask_unblocked_column_list(
+    label: str,
+    default: Any,
+    description: str,
+    used_in: str,
+    blocked: Any,
+    prefix: str,
+    *,
+    clash_reason: str = "duplicates a required column mapping.",
+    target_blocked: Any = (),
+    target_ignore_case: bool = False,
+) -> list[str]:
+    """Prompt for a column list and reject names already mapped or reserved on the target side."""
+    source_set = {name for name in blocked if name}
+    try:
+        suggested = _without_source_or_target(
+            parse_column_list(default or [], prefix),
+            source_set,
+            target_blocked,
+            target_ignore_case=target_ignore_case,
+        )
+    except ValueError:
+        suggested = []
+    while True:
+        selected = ask_optional_column_list(label, suggested, description, used_in)
+        source_clash = columns_clashing_with(selected, source_set)
+        if source_clash:
+            print(f"\n  Already mapped (do not list again): {', '.join(source_clash)}")
+            if clash_reason:
+                print(f"  {prefix} entry '{source_clash[0]}' {clash_reason}")
+            suggested = _without_source_or_target(
+                selected, source_set, target_blocked, target_ignore_case=target_ignore_case
+            )
+            continue
+        target_clash = columns_clashing_with(
+            selected, target_blocked, ignore_case=target_ignore_case
+        )
+        if target_clash:
+            reason = canonical_target_clash_reason(target_blocked)
+            print(f"\n  Reserved destination name (do not list): {', '.join(target_clash)}")
+            print(f"  {prefix} entry '{target_clash[0]}' {reason}")
+            suggested = _without_source_or_target(
+                selected, source_set, target_blocked, target_ignore_case=target_ignore_case
+            )
+            continue
+        return selected
 
 
 def require_non_blank_column(value: Any, prefix: str) -> str:
@@ -1159,6 +1293,69 @@ def resolve_layer_parent_key(entry: dict[str, Any]) -> str | None:
     return None
 
 
+def _source_column_name(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    name = value.strip()
+    if not name or name.lower() == "null" or "<" in name:
+        return None
+    return name
+
+
+def _unique_column_names(values: list[Any]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        name = _source_column_name(value)
+        if name is None or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def layer_canonical_source_columns(entry: dict[str, Any]) -> list[str]:
+    """Source columns already mapped in the layer's required fields."""
+    return _unique_column_names(
+        [
+            entry.get("primary_key"),
+            resolve_layer_parent_key(entry),
+            entry.get("created_at_column"),
+            entry.get("geometry_column"),
+            entry.get("updated_at_column"),
+            entry.get("label_column"),
+        ]
+    )
+
+
+def aoi_canonical_source_columns(aoi: dict[str, Any]) -> list[str]:
+    """Source columns already mapped in the AOI's required fields."""
+    return _unique_column_names(
+        [
+            aoi.get("primary_key"),
+            aoi.get("created_at_column"),
+            aoi.get("territory_level_3_column"),
+            aoi.get("area_column"),
+            aoi.get("geometry_column"),
+            aoi.get("updated_at_column"),
+        ]
+    )
+
+
+def ask_layer_additional_columns(entry: dict[str, Any]) -> list[str]:
+    """Prompt for layer additional_columns and reject names already mapped or reserved on the target side."""
+    return ask_unblocked_column_list(
+        "Extra columns to migrate",
+        entry.get("additional_columns") or [],
+        etl_field_help("additional_columns"),
+        "the ETL job mapping for this layer",
+        layer_canonical_source_columns(entry),
+        "additional_columns",
+        target_blocked=LAYER_CANONICAL_TARGET_COLUMNS,
+        target_ignore_case=True,
+    )
+
+
 def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
     """Validate and normalize etl.layers entries."""
     raw_layers = get(values, "etl", "layers", default=[])
@@ -1254,21 +1451,13 @@ def validate_extra_layers(values: dict[str, Any]) -> list[dict[str, Any]]:
             entry.get("additional_columns"),
             f"{prefix}.additional_columns",
         )
-        canonical = {
-            normalized["primary_key"],
-            aoi_column.strip(),
-            normalized["created_at_column"],
-            normalized["geometry_column"],
-        }
-        if normalized["updated_at_column"]:
-            canonical.add(normalized["updated_at_column"])
-        if normalized["label_column"]:
-            canonical.add(normalized["label_column"])
-        for column in extras:
-            if column in canonical:
-                raise ValueError(
-                    f"{prefix}.additional_columns entry '{column}' duplicates a required column mapping."
-                )
+        reject_source_and_target_clashes(
+            extras,
+            layer_canonical_source_columns(entry),
+            LAYER_CANONICAL_TARGET_COLUMNS,
+            f"{prefix}.additional_columns",
+            target_ignore_case=True,
+        )
         if extras:
             normalized["additional_columns"] = extras
         validated.append(normalized)
@@ -1694,12 +1883,7 @@ def ask_generic_layer_entry(
                 break
             print("\n  Enter the source column name.")
 
-    entry["additional_columns"] = ask_optional_column_list(
-        "Extra columns to migrate",
-        entry.get("additional_columns") or [],
-        etl_field_help("additional_columns"),
-        "the ETL job mapping for this layer",
-    )
+    entry["additional_columns"] = ask_layer_additional_columns(entry)
     entry["where_clause"] = ask_field(
         "where-clause", entry.get("where_clause", "1=1"),
         "Optional SQL filter applied while reading this layer.",
@@ -1799,6 +1983,31 @@ def ask_generic_layers(config: dict[str, Any]) -> None:
             continue
         if ask_bool("  Edit this layer", False):
             item = ask_generic_layer_entry(config, item)
+        else:
+            blocked = layer_canonical_source_columns(item)
+            try:
+                extras = parse_column_list(
+                    item.get("additional_columns") or [], "additional_columns"
+                )
+                needs_fix = bool(columns_clashing_with(extras, blocked)) or bool(
+                    columns_clashing_with(
+                        extras, LAYER_CANONICAL_TARGET_COLUMNS, ignore_case=True
+                    )
+                )
+            except ValueError:
+                needs_fix = True
+            if needs_fix:
+                print(
+                    "\n  additional_columns lists columns already mapped or reserved "
+                    "on the destination for this layer."
+                )
+                print(f"  Already mapped: {', '.join(blocked)}")
+                print(
+                    "  Reserved destination: "
+                    f"{', '.join(LAYER_CANONICAL_TARGET_COLUMNS)}"
+                )
+                item = copy.deepcopy(item)
+                item["additional_columns"] = ask_layer_additional_columns(item)
         result.append(item)
 
     add_next = not result
@@ -1976,32 +2185,48 @@ def wizard(example: Path, active: Path, *, edit: bool = False, root: Path | None
                 "the ETL job mapping for this entity",
             )
         if name == "area_of_interest":
-            config["etl"][name]["additional_columns"] = ask_optional_column_list(
+            aoi_section = config["etl"][name]
+            theme_names = expected_theme_source_columns(theme_count)
+            additional_blocked = set(aoi_canonical_source_columns(aoi_section)) | set(theme_names)
+            aoi_section["additional_columns"] = ask_unblocked_column_list(
                 "Extra columns to migrate",
-                config["etl"][name].get("additional_columns") or [],
+                aoi_section.get("additional_columns") or [],
                 etl_field_help("additional_columns"),
                 "the ETL job mapping for this entity",
+                additional_blocked,
+                "etl.area_of_interest.additional_columns",
+                target_blocked=AOI_CANONICAL_TARGET_COLUMNS,
             )
             if theme_count > 0:
-                default_themes = expected_theme_source_columns(theme_count)
+                business_blocked = set(aoi_canonical_source_columns(aoi_section)) | set(
+                    aoi_section["additional_columns"]
+                )
                 while True:
                     selected = ask_optional_column_list(
                         "Theme KPI columns (business_only_persist_columns)",
-                        config["etl"][name].get("business_only_persist_columns") or default_themes,
+                        aoi_section.get("business_only_persist_columns") or theme_names,
                         etl_field_help("business_only_persist_columns"),
                         "the ETL job mapping for this entity",
                     )
                     try:
-                        config["etl"][name]["business_only_persist_columns"] = validate_business_only_persist_columns(
+                        validated = validate_business_only_persist_columns(
                             selected,
                             theme_count,
                             "etl.area_of_interest.business_only_persist_columns",
                         )
+                        reject_source_and_target_clashes(
+                            validated,
+                            business_blocked,
+                            AOI_CANONICAL_TARGET_COLUMNS,
+                            "etl.area_of_interest.business_only_persist_columns",
+                            source_reason="duplicates a required or additional column mapping.",
+                        )
+                        aoi_section["business_only_persist_columns"] = validated
                         break
                     except ValueError as exc:
                         print(f"\n  {exc}")
             else:
-                config["etl"][name]["business_only_persist_columns"] = []
+                aoi_section["business_only_persist_columns"] = []
         config["etl"][name]["where_clause"] = ask_field(
             "where-clause", config["etl"][name]["where_clause"],
             "Optional SQL filter applied while reading this entity.",
@@ -2569,32 +2794,25 @@ def apply_config(root: Path, active: Path, *, quiet: bool = False) -> None:
         aoi["updated-at-column"] = updated_at_column
     else:
         aoi.pop("updated-at-column", None)
-    canonical_source = {
-        aoi["primary-key"],
-        aoi["creation-date-column"],
-        aoi["territory-level-3-column"],
-        aoi["total-area-column"],
-        aoi["geometry-column"],
-    }
-    if updated_at_column:
-        canonical_source.add(updated_at_column)
-    for column in additional_columns:
-        if column in canonical_source:
-            raise ValueError(
-                "etl.area_of_interest.additional_columns entry "
-                f"'{column}' duplicates a required column mapping."
-            )
+    canonical_source = aoi_canonical_source_columns(aoi_values)
+    reject_source_and_target_clashes(
+        additional_columns,
+        canonical_source,
+        AOI_CANONICAL_TARGET_COLUMNS,
+        "etl.area_of_interest.additional_columns",
+    )
     aoi["additional-columns"] = additional_columns
     aoi.pop("comparison-columns", None)
     aoi.pop("column-mapping", None)
     aoi.pop("change-detection-strategy", None)
     aoi["business-only-persist-columns"] = business_only_columns
-    for column in business_only_columns:
-        if column in canonical_source or column in additional_columns:
-            raise ValueError(
-                f"etl.area_of_interest.business_only_persist_columns entry '{column}' duplicates "
-                "a required or additional column mapping."
-            )
+    reject_source_and_target_clashes(
+        business_only_columns,
+        set(canonical_source) | set(additional_columns),
+        AOI_CANONICAL_TARGET_COLUMNS,
+        "etl.area_of_interest.business_only_persist_columns",
+        source_reason="duplicates a required or additional column mapping.",
+    )
     migration["batch"]["layers"] = build_batch_layers(extra_layers)
     jobs = etl.get("jobs", {})
     job_names = {

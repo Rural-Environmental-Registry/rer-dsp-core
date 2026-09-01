@@ -242,7 +242,10 @@ services:
 
   # Single entry point: other HTTP services do not publish a host port.
   dsp-gateway:
-    image: nginx:alpine
+    image: dsp-gateway:local
+    build:
+      context: ./config/Gateway
+      dockerfile: docker/Dockerfile
     container_name: dsp-gateway
     restart: unless-stopped
     ports:
@@ -254,7 +257,6 @@ services:
       DSP_GATEWAY_CACHE_BYPASS: ${DSP_GATEWAY_CACHE_BYPASS-1}
       DSP_GATEWAY_CACHE_TTL: ${DSP_GATEWAY_CACHE_TTL:-10m}
     volumes:
-      - ./config/Gateway/nginx:/etc/nginx/templates:ro
       - dsp_gateway_cache:/var/cache/nginx/dsp
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/gateway/health || exit 1"]

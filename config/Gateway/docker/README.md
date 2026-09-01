@@ -1,23 +1,26 @@
 # Gateway (DSP)
 
-Reverse proxy nginx que é a porta de entrada única da stack. Frontend, backend e os dois GeoServers
-não publicam mais porta no host — todo o acesso HTTP passa por aqui.
+Reverse proxy nginx — porta de entrada única da stack. Frontend, backend e os dois GeoServers
+não publicam porta no host; todo o acesso HTTP externo passa por aqui.
 
-## Image
+## Imagem
 
-- Base: `nginx:alpine` (sem build próprio)
-- Compose service: `dsp-gateway`
-- Config: `config/Gateway/nginx/default.conf.template`, montada em `/etc/nginx/templates/`
+- Base: `nginx:alpine`
+- Context de build: `rer-dsp-core/config/Gateway` (`dockerfile: docker/Dockerfile`)
+- Serviço no Compose: `dsp-gateway`
+- Os templates são copiados para a imagem em `/etc/nginx/templates/` (`nginx/default.conf.template`)
 
 O template é processado por `envsubst` na subida do container. Só as variáveis `DSP_*` são
 substituídas (`NGINX_ENVSUBST_FILTER=^DSP_`), para não conflitar com variáveis do próprio nginx
 como `$uri` e `$host`.
 
-## Defaults
+Depois de alterar um template, faça rebuild (`./start.sh` ou `docker compose up -d --build dsp-gateway`).
 
-| Item | Value |
+## Padrões
+
+| Item | Valor |
 | --- | --- |
-| Host port | `8026` (`DSP_GATEWAY_HOST_PORT`) |
+| Porta no host | `8026` (`DSP_GATEWAY_HOST_PORT`) |
 | Base pública | `http://localhost:8026` (`DSP_PUBLIC_BASE_URL`) |
 | Health | http://localhost:8026/gateway/health |
 
@@ -35,9 +38,9 @@ como `$uri` e `$host`.
 | `/gateway/health` | resposta local do nginx | — |
 
 O prefixo do backend acompanha `DSP_BACKEND_CONTEXT_PATH`. Como os dois GeoServers respondem em
-`/geoserver` internamente, cada um recebe um prefixo externo próprio e um `rewrite`; o
-`PROXY_BASE_URL` de cada um garante que os links do GetCapabilities e da UI web saiam com a URL
-pública correta.
+`/geoserver` internamente, cada um recebe um prefixo externo próprio e um `rewrite`. O
+`PROXY_BASE_URL` de cada GeoServer garante que os links do GetCapabilities e da UI web saiam com
+a URL pública correta.
 
 ## Cache
 
@@ -66,12 +69,12 @@ conferir o comportamento:
 curl -sI "http://localhost:8026/geoserver-exhibition/dsp/wms?service=WMS&request=GetCapabilities" | grep -i x-cache
 ```
 
-Para limpar o cache: `docker compose --env-file .env down` e remover o volume `dsp_gateway_cache`.
+Para limpar o cache: `docker compose --env-file .env down` e remova o volume `dsp_gateway_cache`.
 
 ## Notas
 
 - Os upstreams são resolvidos em runtime pelo DNS do Docker (`resolver 127.0.0.11` + nome em
   variável). Assim o gateway sobe mesmo com algum serviço parado, respondendo `502` em vez de
-  falhar no boot — necessário no modo demo do `./setup.sh`, que não sobe backend e frontend.
-- Não há terminação TLS aqui. Expor via HTTPS continua a cargo do adotante, e este é o ponto
+  falhar no boot — necessário no modo demo do `./setup.sh`, que não sobe backend nem frontend.
+- Não há terminação TLS aqui. Expor via HTTPS continua a cargo do adotante; este é o ponto
   natural para fazê-lo.
