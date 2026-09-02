@@ -1,0 +1,3 @@
+# Adopter YAML and SQL stay out of this context (SQL is copied into the database images).
+adopter/
+db/

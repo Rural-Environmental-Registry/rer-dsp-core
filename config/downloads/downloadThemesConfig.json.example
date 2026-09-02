@@ -1,0 +1,16 @@
+{
+  "wfsBaseUrl": "http://localhost:8026/geoserver-download/dsp/wfs",
+  "themes": [
+    {
+      "code": "area_of_interest",
+      "name": "Area of interest",
+      "typeName": "dsp:area-of-interest",
+      "formats": ["csv"],
+      "enabled": true,
+      "territoryFilter": {
+        "strategy": "direct",
+        "level3Field": "territory_level_3_id"
+      }
+    }
+  ]
+}

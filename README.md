@@ -1,46 +1,87 @@
-# RER DSP — Core
+# rer-dsp-core
 
-**Projeto**: Rural Environmental Registry — Data Sharing Platform  
-**Componente**: Core (Lógica de Domínio)  
-**Tipo**: Digital Public Good (DPG)  
-**Licença**: GPL-3.0
+> Este repositório é um dos módulos do **DSP (Data Sharing Platform)**, parte do ecossistema RER.
+> A documentação completa do projeto está em **[rer-dsp-docs](https://github.com/Rural-Environmental-Registry/rer-dsp-docs)**.
+> As informações abaixo tratam apenas deste módulo, não do projeto DSP como um todo.
 
----
+## Qual parte do DSP este módulo é
 
-## 📋 Visão Geral
+```mermaid
+flowchart LR
+    Backend[rer-dsp-backend]
+    Frontend[rer-dsp-frontend]
+    Job[rer-dsp-job-data-migration]
+    Docs[(rer-dsp-docs)]
+    Core((rer-dsp-core))
 
-Biblioteca core da plataforma DSP do RER. Contém a lógica de domínio, modelos de dados, regras de negócio e utilitários compartilhados entre os demais componentes.
-
-## 🏗️ Arquitetura
-
-Este componente faz parte do ecossistema RER DSP:
-
-```
-rer-dsp-frontend (UI)
-    ↓
-rer-dsp-backend (API REST)
-    ↓
-rer-dsp-core  ← ESTE REPO
-    ↓
-rer-dsp-job-data-migration (ETL)
-rer-dsp-job-geo-file-generation (geoespacial)
+    Core --> Backend
+    Core --> Frontend
+    Core --> Job
+    Core --> Docs
 ```
 
-## 🚀 Setup
+## Objetivo
+
+Orquestra, via Docker Compose, os bancos de dados (PostgreSQL/PostGIS), o GeoServer, o gateway e a
+configuração do adotante para toda a stack DSP.
+
+## Responsabilidades
+
+- Subir e configurar os bancos de dados (`dsp-db`, `dsp-geoserver-db`)
+- Subir o GeoServer de exibição (WMS)
+- Subir o gateway nginx (`dsp-gateway`), porta de entrada única da stack
+- Guiar a configuração do adotante (hierarquia, telas, KPIs, camadas do mapa,
+  página About)
+- Orquestrar os demais módulos via Docker Compose
+
+## Tecnologias
+
+Docker Compose, PostgreSQL/PostGIS, GeoServer, nginx, Bash, Python.
+
+## Pré-requisitos
+
+| Ferramenta | Versão | Uso |
+|------------|--------|-----|
+| Git | 2.x+ | Clonar repositórios irmãos (automático ou manual), se ainda não existirem |
+| Docker | 24+ com Compose v2 | Subir bancos, GeoServer e módulos |
+| Python | 3 | Wizard `./config.sh` |
+
+## Como executar
+
+Clone apenas o core e siga os scripts. Os demais repositórios podem ser clonados
+automaticamente quando ausentes (`./config.sh`, `./setup.sh` e `./start.sh` exibem
+a estrutura de pastas antes de confirmar o clone). O `.env` é criado automaticamente
+a partir de `.env.example` na primeira execução.
 
 ```bash
-# Clonar
 git clone https://github.com/Rural-Environmental-Registry/rer-dsp-core.git
 cd rer-dsp-core
-
-# Instruções de build serão adicionadas conforme desenvolvimento
+./config.sh
+./setup.sh
+./start.sh
 ```
 
-## 📖 Documentação
+Ao final, tudo é acessível por uma única porta (default `8026`):
 
-- [RER — Visão Geral](https://github.com/Rural-Environmental-Registry)
-- [SDD (System Design Document)](https://github.com/Rural-Environmental-Registry/core)
+| Serviço | URL |
+|---------|-----|
+| Frontend | http://localhost:8026/dsp/ |
+| Backend API | http://localhost:8026/dsp-backend |
+| GeoServer Exhibition | http://localhost:8026/geoserver-exhibition/web/ |
+| GeoServer Download | http://localhost:8026/geoserver-download/web/ |
 
-## 📜 Licença
+Detalhes de rotas e cache: [`config/Gateway/docker/README.md`](config/Gateway/docker/README.md).
 
-Este projeto é licenciado sob a [GNU General Public License v3.0](LICENSE).
+Estrutura esperada após o setup (layout padrão):
+
+```text
+DSP/
+├── rer-dsp-core/
+├── rer-dsp-backend/
+├── rer-dsp-frontend/
+└── rer-dsp-job-data-migration/
+```
+
+## Licença
+
+[GNU General Public License v3.0](LICENSE)

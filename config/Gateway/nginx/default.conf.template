@@ -1,0 +1,128 @@
+# Porta de entrada única da stack DSP.
+# Processado por envsubst na subida do container (apenas variáveis DSP_*, ver NGINX_ENVSUBST_FILTER).
+
+# Zona de cache declarada sempre; o uso efetivo é controlado por DSP_GATEWAY_CACHE_BYPASS.
+proxy_cache_path /var/cache/nginx/dsp
+                 levels=1:2
+                 keys_zone=dsp_cache:10m
+                 max_size=1g
+                 inactive=60m
+                 use_temp_path=off;
+
+server {
+    listen      8080;
+    listen      [::]:8080;
+    server_name _;
+
+    # DNS interno do Docker. Combinado com upstreams em variável, permite que o gateway
+    # suba mesmo com algum container parado (responde 502 em vez de falhar no boot).
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
+    client_max_body_size 16m;
+
+    # O container escuta em 8080 mas é publicado em outra porta; sem isso os redirects
+    # locais sairiam apontando para a porta interna.
+    absolute_redirect off;
+
+    access_log /var/log/nginx/access.log;
+    error_log  /var/log/nginx/error.log notice;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+
+    # Vazio liga o cache; qualquer valor não vazio faz bypass.
+    set $dsp_cache_bypass "${DSP_GATEWAY_CACHE_BYPASS}";
+
+    location = / {
+        return 302 /dsp/;
+    }
+
+    # Sem a barra final nenhum prefixo casa; redireciona para a forma canônica.
+    location = /dsp {
+        return 301 /dsp/;
+    }
+
+    location = ${DSP_BACKEND_CONTEXT_PATH} {
+        return 301 ${DSP_BACKEND_CONTEXT_PATH}/;
+    }
+
+    location = /geoserver-exhibition {
+        return 301 /geoserver-exhibition/;
+    }
+
+    location = /geoserver-download {
+        return 301 /geoserver-download/;
+    }
+
+    location = /gateway/health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location /dsp/ {
+        set $dsp_frontend dsp-frontend:8080;
+        proxy_pass http://$dsp_frontend;
+    }
+
+    location ${DSP_BACKEND_CONTEXT_PATH}/ {
+        set $dsp_backend dsp-backend:8080;
+        proxy_pass http://$dsp_backend;
+        proxy_read_timeout 300s;
+    }
+
+    # Endpoints de serviço WMS/WFS: sem sessão, é o que vale a pena cachear.
+    # Locations regex têm precedência sobre as de prefixo abaixo, que servem a UI web e a REST.
+    # O GeoServer responde "Cache-Control: max-age=0, must-revalidate" em toda requisição;
+    # ignorar esse header é o que permite o cache funcionar.
+    location ~ ^/geoserver-exhibition/[^/]+/(wms|wfs)$ {
+        set $dsp_geoserver_exhibition dsp-geoserver-exhibition:8080;
+        rewrite ^/geoserver-exhibition/(.*)$ /geoserver/$1 break;
+        proxy_pass http://$dsp_geoserver_exhibition;
+        proxy_read_timeout 300s;
+
+        proxy_cache dsp_cache;
+        proxy_cache_valid 200 ${DSP_GATEWAY_CACHE_TTL};
+        proxy_cache_bypass $dsp_cache_bypass;
+        proxy_no_cache     $dsp_cache_bypass;
+        proxy_ignore_headers Cache-Control Expires Set-Cookie;
+        proxy_hide_header Set-Cookie;
+        add_header X-Cache-Status $upstream_cache_status always;
+    }
+
+    location ~ ^/geoserver-download/[^/]+/(wms|wfs)$ {
+        set $dsp_geoserver_download dsp-geoserver-download:8080;
+        rewrite ^/geoserver-download/(.*)$ /geoserver/$1 break;
+        proxy_pass http://$dsp_geoserver_download;
+        proxy_read_timeout 300s;
+
+        proxy_cache dsp_cache;
+        proxy_cache_valid 200 ${DSP_GATEWAY_CACHE_TTL};
+        proxy_cache_bypass $dsp_cache_bypass;
+        proxy_no_cache     $dsp_cache_bypass;
+        proxy_ignore_headers Cache-Control Expires Set-Cookie;
+        proxy_hide_header Set-Cookie;
+        add_header X-Cache-Status $upstream_cache_status always;
+    }
+
+    # Os dois GeoServers respondem em /geoserver internamente, então cada um recebe um prefixo
+    # externo próprio e um rewrite. Os links que eles geram vêm corretos via PROXY_BASE_URL.
+    # Aqui fica o restante de cada um (UI web, REST): sem cache, preserva a sessão.
+    location /geoserver-exhibition/ {
+        set $dsp_geoserver_exhibition dsp-geoserver-exhibition:8080;
+        rewrite ^/geoserver-exhibition/(.*)$ /geoserver/$1 break;
+        proxy_pass http://$dsp_geoserver_exhibition;
+        proxy_read_timeout 300s;
+    }
+
+    location /geoserver-download/ {
+        set $dsp_geoserver_download dsp-geoserver-download:8080;
+        rewrite ^/geoserver-download/(.*)$ /geoserver/$1 break;
+        proxy_pass http://$dsp_geoserver_download;
+        proxy_read_timeout 300s;
+    }
+}
