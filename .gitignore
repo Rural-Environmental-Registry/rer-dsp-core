@@ -1,0 +1,37 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+config/installation/installation-config.json
+config/map/mapLayersConfig.json
+config/downloads/downloadThemesConfig.json
+config/Job-Data-Migration/application/application.yaml
+config/adopter/adopter-config.yaml
+config/about/about-config.json
+config/about/*.md
+!config/about/*.md.example
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+logs/
+*.tmp
+*.bak
+*~
+
+# AI assistants
+.kiro
+.amazonq/
+.continue/

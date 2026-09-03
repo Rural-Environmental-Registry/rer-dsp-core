@@ -1,0 +1,268 @@
+# Adopter configuration
+#
+# This is the only file to edit in the advanced workflow.
+# DSP contract keys are kept by the core templates.
+# To fill in this file step by step, run: ./config.sh
+# Wizard order: 1 database, 2 tables/jobs, 3 application, 4 interface.
+# Quote strings only when YAML requires it (special characters). Numbers, booleans and null are not quoted.
+
+environment:
+  # Source database connection used by the migration.
+  source_jdbc_url: "jdbc:postgresql://source-db-host:5433/source_db"
+  source_db_user: "postgres"
+  source_db_password: "postgres"
+  # SRID of the source geometry data.
+  layer_srs:
+    territory_level_1: 4326
+    territory_level_2: 4326
+    territory_level_3: 4326
+    area_of_interest: 4326
+
+etl:
+  # Enter the tables and columns available in the source database.
+  # Wizard: use a simple table name (schema.table).
+  # Advanced: SQL subqueries are allowed only in this file. Use a YAML folded
+  # block (>-). Column fields below must match the SELECT aliases, for example:
+  #
+  #   source_table: >-
+  #     (SELECT c.shape_id,
+  #             c.nome,
+  #             c.geom,
+  #             d.shape_id AS parent_shape_id
+  #      FROM public.concelhos c
+  #      INNER JOIN public.distritos d ON d.id = c.distrito_id
+  #      WHERE c.geom IS NOT NULL
+  #        AND c.shape_id IS NOT NULL
+  #        AND d.shape_id IS NOT NULL) AS src_l2
+  #   primary_key: "shape_id"
+  #   parent_key: "parent_shape_id"
+  #   name_column: "nome"
+  #   geometry_column: "geom"
+  #   updated_at_column: "data_atualizacao"
+  #
+  # After editing SQL here, run: ./config.sh
+  level1:
+    source_table: "<source_schema>.<source_table>"
+    primary_key: "<source_pk>"
+    name_column: "<source_name>"
+    geometry_column: "<source_geom>"
+    created_at_column: "<source_created_at>"
+    updated_at_column: "<source_updated_at>"         # optional column
+    where_clause: "1=1"
+  level2:
+    source_table: "<source_schema>.<source_table>"
+    primary_key: "<source_pk>"
+    parent_key: "<source_parent_pk>"
+    name_column: "<source_name>"
+    geometry_column: "<source_geom>"
+    created_at_column: "<source_created_at>"
+    updated_at_column: "<source_updated_at>"          # optional column
+    where_clause: "1=1"
+  level3:
+    source_table: "<source_schema>.<source_table>"
+    primary_key: "<source_pk>"
+    parent_key: "<source_parent_pk>"
+    name_column: "<source_name>"
+    geometry_column: "<source_geom>"
+    created_at_column: "<source_created_at>"
+    updated_at_column: "<source_updated_at>"           # optional column
+    where_clause: "1=1"
+  area_of_interest:
+    source_table: "<source_schema>.<source_table>"
+    primary_key: "<source_pk>"
+    geometry_column: "<source_geom>"
+    created_at_column: "<source_created_at>"
+    updated_at_column: "<source_updated_at>"           # optional column
+    territory_level_3_column: "<source_territory_level_3_fk>"
+    area_column: "<source_area>"
+    business_only_persist_columns:
+      - "theme_1"
+      - "theme_2"
+      - "theme_3"
+      - "theme_4"
+    additional_columns: []
+    where_clause: "1=1"
+  
+  # Extra geographic layers (generic). Each item migrates to dsp.<table> on
+  # geoserver-db, is published to GeoServer, and appears in the map panel.
+  # Presentation and ETL share one entry to avoid drift. Leave empty when unused.
+  # Filled by ./config.sh (stage 2) or edited here directly.
+  #
+  #   layers:
+  #     - source_table: "<schema>.<table>"   # origin schema (e.g. public) — never dsp
+  #       parent_key: "<source_parent_pk>"   # AOI FK (e.g. aeroporto_id)
+  #       primary_key: "<source_pk>"
+  #       created_at_column: "<source_created_at>"
+  #       updated_at_column: "<source_updated_at>"      # optional column
+  #       label_column: "<source_name>"                 # optional column
+  #       geometry_column: "<source_geom>"
+  #       additional_columns: []
+  #       layer_name: "<wms_id>"             # technical id (lowercase, hyphens ok)
+  #       srid: 4326
+  #       where_clause: "1=1"
+  #       display_name: "<ui_label>"         # human-readable map label
+  #       group_key: "<group_key>"           # map.group_names key (or new key)
+  #       active_default: false
+  #       color: "#2563EB"
+  #       fill_color: "transparent"
+  layers: []
+  jobs:
+    level1: true
+    level2: true
+    level3: true
+    area_of_interest: true
+    layer_jobs: true
+
+  parallelization:
+    level1:
+      thread_pool_size: 1
+      chunk_size: 1
+      page_size: 1000
+    level2:
+      thread_pool_size: 4
+      chunk_size: 1
+      page_size: 1000
+    level3:
+      thread_pool_size: 4
+      chunk_size: 100
+      page_size: 1000
+    area_of_interest:
+      thread_pool_size: 1
+      chunk_size: 100
+      page_size: 1000
+
+installation:
+  kpis:
+    # Optional theme KPIs in the source database (0 to 4). AOI KPI always exists.
+    theme_count: 4
+    area_of_interest:
+      label: "Registered properties"
+      unit_of_measurement: "un."
+      optional_label: "ha"
+      accent_color: "#d3e500"
+    theme_1:
+      enabled: true
+      label: "Theme 1"
+      unit_of_measurement: "un."
+      accent_color: "#cf95e5"
+    theme_2:
+      enabled: true
+      label: "Theme 2"
+      unit_of_measurement: "un."
+      accent_color: "#a698e5"
+    theme_3:
+      enabled: true
+      label: "Theme 3"
+      unit_of_measurement: "un."
+      accent_color: "#91c9e5"
+    theme_4:
+      enabled: true
+      label: "Theme 4"
+      unit_of_measurement: "un."
+      accent_color: "#8ce5b5"
+  area:
+    unit: "ha"
+    unit_label: "ha"
+  formats:
+    date: "dd/MM/yyyy"
+    date_time: "dd/MM/yyyy HH:mm"
+  hierarchy:
+    level1:
+      label: "Continent"
+      placeholder: "Select continent"
+    level2:
+      label: "Country"
+      placeholder: "Select country"
+    level3:
+      label: "Administrative area"
+      placeholder: "Select administrative area"
+  screens:
+    home_title: "Browse registered data"
+    downloads_title: "Download public data"
+    identifier:
+      label: "Identifier"
+      placeholder: "Enter the identifier"
+    detail:
+      section_title: "Search details"
+      area_of_interest_section_title: "Area of interest data"
+      registration_date_label: "Registration date"
+      alteration_date_label: "Alteration date"
+      latitude_label: "Latitude"
+      longitude_label: "Longitude"
+      area_label: "Area"
+      features_download_label: "Download features"
+      # Optional. Fields shown on the details panel (order is kept).
+      # Mix destination column names with calculated.* keys.
+      # Columns: additional_columns extras, or canonical id / created_at /
+      # updated_at / area.
+      # calculated.* is calculated by the application, not a source column:
+      #   calculated.latitude, calculated.longitude,
+      #   calculated.territory_level_2_name, calculated.territory_level_3_name
+      # Empty [] keeps the current built-in details list.
+      # Example:
+      #   fields:
+      #     - field: "id"
+      #       label: "Identifier"
+      #     - field: "nome"
+      #       label: "Property name"
+      #     - field: "calculated.latitude"
+      #       label: "Centroid latitude"
+      fields: []
+    downloads:
+      theme:
+        label: "Theme"
+        placeholder: "All themes"
+      level1_section_title: "Select the continent you want to access for Downloads"
+      level2_section_title: "Options for the selected continent"
+      filter_by_title: "Filter by:"
+
+map:
+  # Initial home map view (opening, Center tool, Clear search).
+  # mode: territorial_bbox | manual | planet
+  # - territorial_bbox: frame from migrated L1/L2/L3; ./config.sh sets planet automatically
+  #   when no territorial ETL level (L1/L2/L3) is configured
+  # - manual: fixed latitude/longitude/zoom (required below)
+  # - planet: always show the whole world (center 0,0 zoom 0)
+  initial_view:
+    mode: "territorial_bbox"
+    latitude: null
+    longitude: null
+    zoom: null
+  # Fixed groups (dt / ird) plus any extra keys used by etl.layers[].group_key.
+  group_names:
+    territorial_division: "Territorial division"
+    areas_of_interest: "Declared areas of interest"
+  layers:
+    # Display names are synced from installation.hierarchy (level1–level3) and
+    # installation.kpis.area_of_interest.label when ./config.sh runs.
+    level1:
+      name: "Continent"
+      active_default: false
+      color: "#9D174D"
+      fill_color: "transparent"
+    level2:
+      name: "Country"
+      active_default: true
+      color: "#DB2777"
+      fill_color: "transparent"
+    level3:
+      name: "Administrative area"
+      active_default: false
+      color: "#701A3A"
+      fill_color: "transparent"
+    area_of_interest:
+      name: "Area of interest"
+      active_default: true
+      color: "#F59E0B"
+      fill_color: "#FEF3C7"
+
+about:
+  # Custom "About" page, built from Markdown files in config/about/.
+  # enabled: false hides the page entirely.
+  # file is only the file name already in config/about/ (e.g. overview.md).
+  # Use ./config.sh to copy a .md from anywhere on this computer into that folder.
+  enabled: false
+  banner_title: "About"
+  tabs:
+    - label: "Overview"
+      file: "overview.md"

@@ -1,0 +1,284 @@
+# Usage: ./config.sh && ./setup.sh && ./start.sh
+# (.env is created automatically from .env.example on first script run)
+
+services:
+  dsp-db:
+    image: dsp-db:local
+    build:
+      context: ./config/db/dsp-db
+      dockerfile: Dockerfile
+    container_name: dsp-db
+    restart: unless-stopped
+    ports:
+      - "${DSP_DB_HOST_PORT:-20654}:5432"
+    environment:
+      POSTGRES_DB: ${DSP_DB_NAME:-dsp-db}
+      POSTGRES_USER: ${DSP_DB_USER:-dsp}
+      POSTGRES_PASSWORD: ${DSP_DB_PASSWORD:-dsp}
+    volumes:
+      - dsp_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - dsp_network
+
+  dsp-geoserver-db:
+    image: dsp-geoserver-db:local
+    build:
+      context: ./config/db/dsp-geoserver-db
+      dockerfile: Dockerfile
+    container_name: dsp-geoserver-db
+    restart: unless-stopped
+    ports:
+      - "${DSP_GEOSERVER_DB_HOST_PORT:-20656}:5432"
+    environment:
+      POSTGRES_DB: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
+      POSTGRES_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      POSTGRES_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
+    volumes:
+      - dsp_geoserver_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - dsp_network
+
+  dsp-job-migration:
+    image: dsp-job-migration:local
+    build:
+      context: ${DSP_JOB_MIGRATION_PATH:-../rer-dsp-job-data-migration}
+      dockerfile: Dockerfile
+      additional_contexts:
+        dsp_config: ./config
+      network: host
+    container_name: dsp-job-migration
+    profiles:
+      - migration
+    restart: "no"
+    entrypoint: ["/migration-entrypoint.sh"]
+    environment:
+      SPRING_CONFIG_LOCATION: file:/config/application.yaml
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      DSP_MIGRATION_EXECUTION_MODE: ${DSP_MIGRATION_EXECUTION_MODE:-once}
+      DSP_MIGRATION_CRON: "${DSP_MIGRATION_CRON:-0 22 * * *}"
+      DSP_MIGRATION_SCHEDULED_AT: "${DSP_MIGRATION_SCHEDULED_AT:-}"
+      DSP_MIGRATION_TZ: ${DSP_MIGRATION_TZ}
+      TZ: ${DSP_MIGRATION_TZ}
+      DSP_SOURCE_JDBC_URL: ${DSP_SOURCE_JDBC_URL}
+      DSP_SOURCE_DB_USER: ${DSP_SOURCE_DB_USER}
+      DSP_SOURCE_DB_PASSWORD: ${DSP_SOURCE_DB_PASSWORD}
+      LAYER_SRS_TERRITORY_LEVEL_1: ${LAYER_SRS_TERRITORY_LEVEL_1:-4326}
+      LAYER_SRS_TERRITORY_LEVEL_2: ${LAYER_SRS_TERRITORY_LEVEL_2:-4326}
+      LAYER_SRS_TERRITORY_LEVEL_3: ${LAYER_SRS_TERRITORY_LEVEL_3:-4326}
+      LAYER_SRS_AREA_OF_INTEREST: ${LAYER_SRS_AREA_OF_INTEREST:-4326}
+      DSP_GEOSERVER_ADMIN_USER: ${DSP_GEOSERVER_ADMIN_USER:-admin}
+      DSP_GEOSERVER_ADMIN_PASSWORD: ${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      DSP_GEOSERVER_DB_NAME: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
+      DSP_GEOSERVER_DB_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      DSP_GEOSERVER_DB_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
+      MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      dsp-db:
+        condition: service_healthy
+      dsp-geoserver-db:
+        condition: service_healthy
+    networks:
+      - dsp_network
+
+  dsp-backend:
+    image: dsp-backend:local
+    build:
+      context: ${DSP_BACKEND_PATH:-../rer-dsp-backend}
+      dockerfile: Dockerfile
+      additional_contexts:
+        dsp_config: ./config
+      args:
+        DSP_BACKEND_PROJECT_NAME: rer-dsp-backend
+        DSP_BACKEND_VERSION: 0.0.1-SNAPSHOT
+    container_name: dsp-backend
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      SERVER_SERVLET_CONTEXT_PATH: ${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}
+      DSP_CORS_ALLOWED_ORIGINS: ${DSP_CORS_ALLOWED_ORIGINS:-http://localhost:8026,http://localhost:5173}
+      DSP_INSTALLATION_CONFIG_FILE: ${DSP_INSTALLATION_CONFIG_FILE:-file:/config/installation-config.json}
+      DSP_MAP_LAYERS_FILE: ${DSP_MAP_LAYERS_FILE:-file:/config/mapLayersConfig.json}
+      DSP_DOWNLOAD_THEMES_FILE: ${DSP_DOWNLOAD_THEMES_FILE:-file:/config/downloadThemesConfig.json}
+      DSP_ABOUT_CONFIG_FILE: ${DSP_ABOUT_CONFIG_FILE:-file:/config/about/about-config.json}
+      DSP_ABOUT_CONTENT_DIR: ${DSP_ABOUT_CONTENT_DIR:-file:/config/about/}
+      DSP_GEOSERVER_WFS_BASE_URL: ${DSP_GEOSERVER_WFS_BASE_URL:-http://dsp-geoserver-download:8080/geoserver/dsp/wfs}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://dsp-db:5432/${DSP_DB_NAME:-dsp-db}
+      SPRING_DATASOURCE_USERNAME: ${DSP_DB_USER:-dsp}
+      SPRING_DATASOURCE_PASSWORD: ${DSP_DB_PASSWORD:-dsp}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: none
+    depends_on:
+      dsp-db:
+        condition: service_healthy
+    networks:
+      - dsp_network
+
+  dsp-geoserver-exhibition:
+    image: dsp-geoserver-exhibition:local
+    build:
+      context: ./config
+      dockerfile: GeoserverExhibition/docker/Dockerfile
+      network: host
+    container_name: dsp-geoserver-exhibition
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      # Public URL via the gateway, so GetCapabilities and the web UI generate correct links.
+      # The external prefix differs from the internal one (/geoserver), so this is required.
+      PROXY_BASE_URL: ${DSP_PUBLIC_BASE_URL:-http://localhost:8026}/geoserver-exhibition
+      GEOSERVER_DATA_DIR: /var/geoserver/datadir
+      RUN_UNPRIVILEGED: "true"
+      RUN_WITH_USER_UID: "999"
+      RUN_WITH_USER_GID: "999"
+      CHANGE_OWNERSHIP_ON_FOLDERS: /opt /var/geoserver/datadir /usr/local/tomcat/temp /usr/local/tomcat/work /usr/local/tomcat/logs
+      GEOSERVER_ADMIN_USER: ${DSP_GEOSERVER_ADMIN_USER:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      GEOSERVER_CSRF_DISABLED: "true"
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "*"
+      CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,HEAD,OPTIONS
+      CORS_ALLOWED_HEADERS: "*"
+      GEOSERVER_URL: http://localhost:8080/geoserver
+      DB_HOST: dsp-geoserver-db
+      DB_PORT: "5432"
+      DB_NAME: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
+      DB_SCHEMA: dsp
+      DB_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      DB_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
+      WORKSPACE_NAME: dsp
+      DATASTORE_NAME: dsp-geoserver-db
+      MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
+      LAYER_SRS_TERRITORY_LEVEL_1: ${LAYER_SRS_TERRITORY_LEVEL_1}
+      LAYER_SRS_TERRITORY_LEVEL_2: ${LAYER_SRS_TERRITORY_LEVEL_2}
+      LAYER_SRS_TERRITORY_LEVEL_3: ${LAYER_SRS_TERRITORY_LEVEL_3}
+      LAYER_SRS_AREA_OF_INTEREST: ${LAYER_SRS_AREA_OF_INTEREST}
+    volumes:
+      - dsp_geoserver_exhibition_data:/var/geoserver/datadir
+    depends_on:
+      dsp-geoserver-db:
+        condition: service_healthy
+    networks:
+      - dsp_network
+
+  dsp-geoserver-download:
+    image: dsp-geoserver-download:local
+    build:
+      context: ./config
+      dockerfile: GeoserverDownload/docker/Dockerfile
+      network: host
+    container_name: dsp-geoserver-download
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      # External prefix differs from the internal one: without this, generated links would point at /geoserver.
+      PROXY_BASE_URL: ${DSP_PUBLIC_BASE_URL:-http://localhost:8026}/geoserver-download
+      GEOSERVER_DATA_DIR: /var/geoserver/datadir
+      RUN_UNPRIVILEGED: "true"
+      RUN_WITH_USER_UID: "999"
+      RUN_WITH_USER_GID: "999"
+      CHANGE_OWNERSHIP_ON_FOLDERS: /opt /var/geoserver/datadir /usr/local/tomcat/temp /usr/local/tomcat/work /usr/local/tomcat/logs
+      GEOSERVER_ADMIN_USER: ${DSP_GEOSERVER_ADMIN_USER:-admin}
+      GEOSERVER_ADMIN_PASSWORD: ${DSP_GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      GEOSERVER_CSRF_DISABLED: "true"
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: "*"
+      CORS_ALLOWED_METHODS: GET,POST,PUT,DELETE,HEAD,OPTIONS
+      CORS_ALLOWED_HEADERS: "*"
+      GEOSERVER_URL: http://localhost:8080/geoserver
+      DB_HOST: dsp-geoserver-db
+      DB_PORT: "5432"
+      DB_NAME: ${DSP_GEOSERVER_DB_NAME:-dsp-geoserver-db}
+      DB_SCHEMA: dsp
+      DB_USER: ${DSP_GEOSERVER_DB_USER:-dsp_geo}
+      DB_PASSWORD: ${DSP_GEOSERVER_DB_PASSWORD:-dsp_geo}
+      WORKSPACE_NAME: dsp
+      DATASTORE_NAME: dsp-geoserver-download-db
+      MAP_LAYERS_CONFIG: /config/mapLayersConfig.json
+      LAYER_SRS_TERRITORY_LEVEL_1: ${LAYER_SRS_TERRITORY_LEVEL_1}
+      LAYER_SRS_TERRITORY_LEVEL_2: ${LAYER_SRS_TERRITORY_LEVEL_2}
+      LAYER_SRS_TERRITORY_LEVEL_3: ${LAYER_SRS_TERRITORY_LEVEL_3}
+      LAYER_SRS_AREA_OF_INTEREST: ${LAYER_SRS_AREA_OF_INTEREST}
+    volumes:
+      - dsp_geoserver_download_data:/var/geoserver/datadir
+    depends_on:
+      dsp-geoserver-db:
+        condition: service_healthy
+    networks:
+      - dsp_network
+
+  dsp-frontend:
+    image: dsp-frontend:local
+    build:
+      context: ${DSP_FRONTEND_PATH:-../rer-dsp-frontend}
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-0.0.0}
+        VITE_BASE_URL: ${VITE_BASE_URL:-/dsp/}
+        VITE_DSP_API_URL: ${VITE_DSP_API_URL:-/dsp-backend}
+    container_name: dsp-frontend
+    restart: unless-stopped
+    expose:
+      - "8080"
+    depends_on:
+      - dsp-backend
+    networks:
+      - dsp_network
+
+  # Single entry point: other HTTP services do not publish a host port.
+  dsp-gateway:
+    image: dsp-gateway:local
+    build:
+      context: ./config/Gateway
+      dockerfile: docker/Dockerfile
+    container_name: dsp-gateway
+    restart: unless-stopped
+    ports:
+      - "${DSP_GATEWAY_HOST_PORT:-8026}:8080"
+    environment:
+      # Only DSP_* variables are substituted in the template, to preserve $uri, $host, etc.
+      NGINX_ENVSUBST_FILTER: "^DSP_"
+      DSP_BACKEND_CONTEXT_PATH: ${DSP_BACKEND_CONTEXT_PATH:-/dsp-backend}
+      DSP_GATEWAY_CACHE_BYPASS: ${DSP_GATEWAY_CACHE_BYPASS-1}
+      DSP_GATEWAY_CACHE_TTL: ${DSP_GATEWAY_CACHE_TTL:-10m}
+    volumes:
+      - dsp_gateway_cache:/var/cache/nginx/dsp
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/gateway/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      - dsp-frontend
+      - dsp-backend
+      - dsp-geoserver-exhibition
+      - dsp-geoserver-download
+    networks:
+      - dsp_network
+
+networks:
+  dsp_network:
+    name: dsp_network
+
+volumes:
+  dsp_db_data:
+  dsp_geoserver_db_data:
+  dsp_geoserver_exhibition_data:
+  dsp_geoserver_download_data:
+  dsp_gateway_cache:
